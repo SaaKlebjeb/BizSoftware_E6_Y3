@@ -44,7 +44,7 @@ Passwords are PBKDF2-derived with a random per-user salt and are never stored in
 
 - Secure registration and login with inactive-user rejection
 - Admin-only product create, edit, and delete rules
-- Product search, category filtering, pagination, sorting, low-stock highlighting, and CSV export
+- Product search, category filtering, pagination, sorting, low-stock highlighting, standards-compliant CSV export, and bordered Excel-compatible spreadsheet export
 - Dashboard cards and product preview
 - Multi-item sales with server-side price lookup and atomic sale/stock/audit transactions
 - Date-range reports with daily/top-product tables, charts, CSV export, and print preview

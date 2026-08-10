@@ -1,6 +1,7 @@
 using InventoryManagementSystem.Models;
 using InventoryManagementSystem.Services;
 using InventoryManagementSystem.Utils;
+using System.ComponentModel;
 using System.Drawing.Printing;
 using System.Windows.Forms.DataVisualization.Charting;
 
@@ -129,10 +130,33 @@ public sealed class ReportsForm : Form
 
     private void ShowPrintPreview()
     {
-        _printDocument.PrintPage -= PrintDocumentOnPrintPage;
-        _printDocument.PrintPage += PrintDocumentOnPrintPage;
-        using var preview = new PrintPreviewDialog { Document = _printDocument, Width = 900, Height = 700 };
-        preview.ShowDialog(this);
+        try
+        {
+            if (PrinterSettings.InstalledPrinters.Count == 0)
+            {
+                ShowPrinterUnavailableMessage("No printer is installed.");
+                return;
+            }
+
+            _printDocument.PrintController = new PreviewPrintController();
+            _printDocument.PrintPage -= PrintDocumentOnPrintPage;
+            _printDocument.PrintPage += PrintDocumentOnPrintPage;
+            using var preview = new PrintPreviewDialog { Document = _printDocument, Width = 900, Height = 700 };
+            preview.ShowDialog(this);
+        }
+        catch (InvalidPrinterException)
+        {
+            ShowPrinterUnavailableMessage("No valid printer is available.");
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1722 || exception.Message.Contains("RPC", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowPrinterUnavailableMessage("The Windows Print Spooler service is unavailable.");
+        }
+    }
+
+    private void ShowPrinterUnavailableMessage(string reason)
+    {
+        MessageBox.Show(this, $"{reason}\n\nStart the Windows Print Spooler service or install Microsoft Print to PDF, then try again. You can still export the report to CSV.", "Print unavailable", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void PrintDocumentOnPrintPage(object? sender, PrintPageEventArgs e)

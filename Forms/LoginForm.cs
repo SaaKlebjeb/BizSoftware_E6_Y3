@@ -101,6 +101,12 @@ public sealed class LoginForm : Form
             Hide();
             using var mainForm = new MainForm(_configuration, _services, session);
             mainForm.ShowDialog(this);
+            if (mainForm.ExitApplicationRequested)
+            {
+                Close();
+                return;
+            }
+
             _loginPassword.Clear();
             Show();
         });

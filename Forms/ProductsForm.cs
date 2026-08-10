@@ -17,6 +17,7 @@ public sealed class ProductsForm : Form
     private readonly Button _previousPage = new() { Text = "Previous", AutoSize = true };
     private readonly Button _nextPage = new() { Text = "Next", AutoSize = true };
     private CancellationTokenSource? _loadCancellation;
+    private bool _suppressFilterEvents = true;
     private int _page;
     private int _totalRows;
 
@@ -47,16 +48,19 @@ public sealed class ProductsForm : Form
         _pageSize.SelectedItem = 25;
         var addButton = new Button { Text = "Add Product", AutoSize = true, Visible = _session.IsAdmin };
         var exportButton = new Button { Text = "Export CSV", AutoSize = true };
+        var excelButton = new Button { Text = "Export Excel", AutoSize = true };
         toolbar.Controls.Add(_searchBox);
         toolbar.Controls.Add(_categoryFilter);
         toolbar.Controls.Add(_pageSize);
         toolbar.Controls.Add(addButton);
         toolbar.Controls.Add(exportButton);
+        toolbar.Controls.Add(excelButton);
         addButton.Click += async (_, _) => await AddProductAsync();
         exportButton.Click += async (_, _) => await ExportAsync();
-        _searchBox.TextChanged += (_, _) => { _page = 0; _ = LoadAsync(); };
-        _categoryFilter.SelectedIndexChanged += (_, _) => { _page = 0; _ = LoadAsync(); };
-        _pageSize.SelectedIndexChanged += (_, _) => { _page = 0; _ = LoadAsync(); };
+        excelButton.Click += async (_, _) => await ExportExcelAsync();
+        _searchBox.TextChanged += (_, _) => RefreshFilterChanged();
+        _categoryFilter.SelectedIndexChanged += (_, _) => RefreshFilterChanged();
+        _pageSize.SelectedIndexChanged += (_, _) => RefreshFilterChanged();
 
         ConfigureGrid();
         var paging = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 42, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
@@ -80,6 +84,17 @@ public sealed class ProductsForm : Form
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.MultiSelect = false;
         _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        _grid.BackgroundColor = Color.White;
+        _grid.BorderStyle = BorderStyle.FixedSingle;
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        _grid.GridColor = Color.FromArgb(210, 218, 226);
+        _grid.RowHeadersVisible = false;
+        _grid.RowTemplate.Height = 30;
+        _grid.EnableHeadersVisualStyles = false;
+        _grid.ColumnHeadersHeight = 34;
+        _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(30, 115, 190), ForeColor = Color.White, Font = new Font("Segoe UI", 10, FontStyle.Bold), Alignment = DataGridViewContentAlignment.MiddleLeft };
+        _grid.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = Color.FromArgb(25, 25, 25), SelectionBackColor = Color.FromArgb(44, 125, 194), SelectionForeColor = Color.White, Padding = new Padding(5, 0, 5, 0) };
+        _grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(245, 247, 250) };
         AddColumn("SKU", nameof(Product.Sku));
         AddColumn("Name", nameof(Product.Name));
         AddColumn("Category", nameof(Product.CategoryName));
@@ -156,6 +171,17 @@ public sealed class ProductsForm : Form
         _categoryFilter.ValueMember = nameof(Category.CategoryId);
     }
 
+    private void RefreshFilterChanged()
+    {
+        if (_suppressFilterEvents)
+        {
+            return;
+        }
+
+        _page = 0;
+        _ = LoadAsync();
+    }
+
     private async Task AddProductAsync()
     {
         using var dialog = new ProductEditForm(_productService, _session);
@@ -222,6 +248,31 @@ public sealed class ProductsForm : Form
         MessageBox.Show(this, "Products exported successfully.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    private async Task ExportExcelAsync()
+    {
+        using var dialog = new SaveFileDialog { Filter = "Excel-compatible files (*.xls)|*.xls|HTML files (*.html)|*.html", FileName = "products.xls" };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var products = await LoadProductsForExportAsync();
+        CsvExporter.ExportHtmlTable(dialog.FileName, "Products", new[] { "SKU", "Name", "Category", "Price", "Quantity", "Low Stock Threshold" }, products.Select(product => new object?[] { product.Sku, product.Name, product.CategoryName, product.Price.ToString("N2"), product.Quantity, product.LowStockThreshold }));
+        MessageBox.Show(this, "Formatted spreadsheet exported successfully.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private async Task<List<Product>> LoadProductsForExportAsync()
+    {
+        var categoryId = _categoryFilter.SelectedValue is int selectedCategoryId && selectedCategoryId > 0 ? (int?)selectedCategoryId : null;
+        var products = new List<Product>();
+        for (var offset = 0; offset < _totalRows; offset += 100)
+        {
+            products.AddRange(await _productService.GetPageAsync(_session, _searchBox.Text, categoryId, offset, 100));
+        }
+
+        return products;
+    }
+
     private int PageSize => _pageSize.SelectedItem is int size ? size : 25;
 
     private async void OnInventoryChanged(object? sender, EventArgs e)
@@ -234,11 +285,14 @@ public sealed class ProductsForm : Form
         base.OnLoad(e);
         try
         {
+            _suppressFilterEvents = true;
             await LoadCategoriesAsync();
+            _suppressFilterEvents = false;
             await LoadAsync();
         }
         catch (Exception exception)
         {
+            _suppressFilterEvents = false;
             MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to load products", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }

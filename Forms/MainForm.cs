@@ -15,6 +15,10 @@ public sealed class MainForm : Form
     private readonly Label _statusLabel = new() { Dock = DockStyle.Bottom, Height = 28, Padding = new Padding(12, 5, 0, 0) };
     private Panel? _sidebar;
     private bool _sidebarExpanded = true;
+    private bool _logoutRequested;
+    private Button? _activeMenuButton;
+
+    public bool ExitApplicationRequested { get; private set; }
 
     public MainForm(AppConfig configuration, ApplicationServices services, Session session)
     {
@@ -52,6 +56,7 @@ public sealed class MainForm : Form
         timer.Tick += (_, _) => _statusLabel.Text = $"User: {_session.FullName}    Role: {_session.Role}    {DateTimeHelper.FormatForDisplay(DateTime.Now)}";
         timer.Start();
         FormClosed += (_, _) => timer.Dispose();
+        FormClosed += OnMainFormClosed;
 
         Controls.Add(contentHost);
         Controls.Add(_sidebar);
@@ -74,18 +79,20 @@ public sealed class MainForm : Form
             menu.Controls.Add(CreateMenuButton("Settings"));
         }
 
-        var logout = CreateMenuButton("Logout");
-        logout.Click += (_, _) => Close();
-        menu.Controls.Add(logout);
+        menu.Controls.Add(CreateMenuButton("Logout"));
+        menu.Controls.Add(CreateMenuButton("Quit"));
         sidebar.Controls.Add(menu);
         return sidebar;
     }
 
     private Button CreateMenuButton(string text)
     {
-        var button = new Button { Text = text, Width = 196, Height = 42, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(30, 115, 190), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(12, 0, 0, 0), Name = $"menu{text}" };
+        var button = new Button { Text = text, Width = 196, Height = 42, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(30, 115, 190), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(12, 0, 0, 0), Name = $"menu{text}", Tag = text };
         button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(52, 139, 204);
         button.Click += (_, _) => SelectModule(text);
+        button.MouseEnter += (_, _) => { if (!ReferenceEquals(button, _activeMenuButton)) button.BackColor = Color.FromArgb(52, 139, 204); };
+        button.MouseLeave += (_, _) => { if (!ReferenceEquals(button, _activeMenuButton)) button.BackColor = Color.FromArgb(30, 115, 190); };
         return button;
     }
 
@@ -93,9 +100,19 @@ public sealed class MainForm : Form
     {
         if (module == "Logout")
         {
+            _logoutRequested = true;
             Close();
             return;
         }
+
+        if (module == "Quit")
+        {
+            ExitApplicationRequested = true;
+            Application.Exit();
+            return;
+        }
+
+        SetActiveMenu(module);
 
         if (module == "Products")
         {
@@ -171,6 +188,7 @@ public sealed class MainForm : Form
 
     private void ShowDashboard()
     {
+        SetActiveMenu("Dashboard");
         _contentPanel.Controls.Clear();
         var dashboardForm = new DashboardForm(_services.Dashboard, _session)
         {
@@ -237,9 +255,35 @@ public sealed class MainForm : Form
                 if (control is Button button)
                 {
                     button.Width = _sidebarExpanded ? 196 : 42;
-                    button.Text = _sidebarExpanded ? button.Name[4..] : button.Name.Length > 4 ? button.Name.Substring(4, 1) : "?";
+                    var menuText = button.Tag?.ToString() ?? button.Name[4..];
+                    button.Text = _sidebarExpanded ? menuText : menuText.Length > 0 ? menuText[..1] : "?";
                 }
             }
+        }
+    }
+
+    private void SetActiveMenu(string module)
+    {
+        if (_sidebar?.Controls.Count != 1 || _sidebar.Controls[0] is not FlowLayoutPanel menu)
+        {
+            return;
+        }
+
+        _activeMenuButton = menu.Controls.OfType<Button>().FirstOrDefault(button => string.Equals(button.Tag?.ToString(), module, StringComparison.Ordinal));
+        foreach (var button in menu.Controls.OfType<Button>())
+        {
+            var isActive = ReferenceEquals(button, _activeMenuButton);
+            button.BackColor = isActive ? Color.FromArgb(18, 83, 145) : Color.FromArgb(30, 115, 190);
+            button.Font = new Font(button.Font, isActive ? FontStyle.Bold : FontStyle.Regular);
+        }
+    }
+
+    private void OnMainFormClosed(object? sender, FormClosedEventArgs e)
+    {
+        if (!_logoutRequested && !ExitApplicationRequested)
+        {
+            ExitApplicationRequested = true;
+            Application.Exit();
         }
     }
 }
