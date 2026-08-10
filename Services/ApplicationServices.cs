@@ -25,7 +25,9 @@ public sealed class ApplicationServices
         Authentication = new AuthenticationService(UserRepository);
         Authorization = new AuthorizationService();
         Products = new ProductService(ProductRepository, CategoryRepository, Authorization);
+        Categories = new CategoryService(CategoryRepository, Authorization);
         Sales = new SalesService(SaleRepository, ProductRepository);
+        AuditLogs = new AuditLogService(AuditLogRepository, Authorization);
         Dashboard = new DashboardService(DashboardRepository);
         Reports = new ReportService(ReportRepository);
         Users = new UserService(UserRepository, Authorization);
@@ -43,7 +45,9 @@ public sealed class ApplicationServices
     public AuthenticationService Authentication { get; }
     public AuthorizationService Authorization { get; }
     public ProductService Products { get; }
+    public CategoryService Categories { get; }
     public SalesService Sales { get; }
+    public AuditLogService AuditLogs { get; }
     public DashboardService Dashboard { get; }
     public ReportService Reports { get; }
     public UserService Users { get; }

@@ -75,6 +75,8 @@ public sealed class MainForm : Form
 
         if (_session.IsAdmin)
         {
+            menu.Controls.Add(CreateMenuButton("Categories"));
+            menu.Controls.Add(CreateMenuButton("Audit Logs"));
             menu.Controls.Add(CreateMenuButton("Users"));
             menu.Controls.Add(CreateMenuButton("Settings"));
         }
@@ -120,6 +122,12 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (module == "Categories")
+        {
+            ShowCategories();
+            return;
+        }
+
         if (module == "Sales")
         {
             ShowSales();
@@ -135,6 +143,12 @@ public sealed class MainForm : Form
         if (module == "Reports")
         {
             ShowReports();
+            return;
+        }
+
+        if (module == "Audit Logs")
+        {
+            ShowAuditLogs();
             return;
         }
 
@@ -163,7 +177,7 @@ public sealed class MainForm : Form
     private void ShowProducts()
     {
         _contentPanel.Controls.Clear();
-        var productsForm = new ProductsForm(_services.Products, _session)
+        var productsForm = new ProductsForm(_services.Products, _services.AuditLogs, _session)
         {
             TopLevel = false,
             FormBorderStyle = FormBorderStyle.None,
@@ -176,7 +190,7 @@ public sealed class MainForm : Form
     private void ShowSales()
     {
         _contentPanel.Controls.Clear();
-        var salesForm = new SalesForm(_services.Products, _services.Sales, _session)
+        var salesForm = new SalesForm(_services.Products, _services.Sales, _session, _configuration.ApplicationName)
         {
             TopLevel = false,
             FormBorderStyle = FormBorderStyle.None,
@@ -184,6 +198,19 @@ public sealed class MainForm : Form
         };
         _contentPanel.Controls.Add(salesForm);
         salesForm.Show();
+    }
+
+    private void ShowCategories()
+    {
+        _contentPanel.Controls.Clear();
+        var categoriesForm = new CategoriesForm(_services.Categories, _session)
+        {
+            TopLevel = false,
+            FormBorderStyle = FormBorderStyle.None,
+            Dock = DockStyle.Fill
+        };
+        _contentPanel.Controls.Add(categoriesForm);
+        categoriesForm.Show();
     }
 
     private void ShowDashboard()
@@ -224,6 +251,19 @@ public sealed class MainForm : Form
         };
         _contentPanel.Controls.Add(usersForm);
         usersForm.Show();
+    }
+
+    private void ShowAuditLogs()
+    {
+        _contentPanel.Controls.Clear();
+        var auditLogsForm = new AuditLogsForm(_services.AuditLogs, _session)
+        {
+            TopLevel = false,
+            FormBorderStyle = FormBorderStyle.None,
+            Dock = DockStyle.Fill
+        };
+        _contentPanel.Controls.Add(auditLogsForm);
+        auditLogsForm.Show();
     }
 
     private void ShowSettings()

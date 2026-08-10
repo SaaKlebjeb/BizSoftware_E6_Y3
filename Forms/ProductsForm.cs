@@ -2,17 +2,21 @@ using InventoryManagementSystem.Events;
 using InventoryManagementSystem.Models;
 using InventoryManagementSystem.Services;
 using InventoryManagementSystem.Utils;
+using System.ComponentModel;
+using System.Drawing.Printing;
 
 namespace InventoryManagementSystem.Forms;
 
 public sealed class ProductsForm : Form
 {
     private readonly ProductService _productService;
+    private readonly AuditLogService _auditLogService;
     private readonly Session _session;
     private readonly TextBox _searchBox = new() { Name = "productSearchBox", PlaceholderText = "Search name, SKU, or category" };
     private readonly ComboBox _categoryFilter = new() { Name = "categoryFilter", DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _pageSize = new() { Name = "pageSize", DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly DataGridView _grid = new() { Name = "productsGrid" };
+    private readonly PrintDocument _printDocument = new();
     private readonly Label _pageLabel = new() { AutoSize = true, Padding = new Padding(8, 8, 8, 0) };
     private readonly Button _previousPage = new() { Text = "Previous", AutoSize = true };
     private readonly Button _nextPage = new() { Text = "Next", AutoSize = true };
@@ -20,19 +24,24 @@ public sealed class ProductsForm : Form
     private bool _suppressFilterEvents = true;
     private int _page;
     private int _totalRows;
+    private IReadOnlyList<Product> _printProducts = [];
+    private int _printIndex;
 
-    public ProductsForm(ProductService productService, Session session)
+    public ProductsForm(ProductService productService, AuditLogService auditLogService, Session session)
     {
         _productService = productService;
+        _auditLogService = auditLogService;
         _session = session;
         Text = "Products";
         FormBorderStyle = FormBorderStyle.None;
         Dock = DockStyle.Fill;
         BuildUi();
         InventoryEvents.ProductChanged += OnInventoryChanged;
+        InventoryEvents.CategoryChanged += OnCategoryChanged;
         FormClosed += (_, _) =>
         {
             InventoryEvents.ProductChanged -= OnInventoryChanged;
+            InventoryEvents.CategoryChanged -= OnCategoryChanged;
             _loadCancellation?.Cancel();
             _loadCancellation?.Dispose();
         };
@@ -47,17 +56,23 @@ public sealed class ProductsForm : Form
         _pageSize.Items.AddRange(new object[] { 25, 50, 100 });
         _pageSize.SelectedItem = 25;
         var addButton = new Button { Text = "Add Product", AutoSize = true, Visible = _session.IsAdmin };
+        var restoreButton = new Button { Text = "Restore Stock", AutoSize = true, Visible = _session.IsAdmin };
         var exportButton = new Button { Text = "Export CSV", AutoSize = true };
         var excelButton = new Button { Text = "Export Excel", AutoSize = true };
+        var printButton = new Button { Text = "Print preview", AutoSize = true };
         toolbar.Controls.Add(_searchBox);
         toolbar.Controls.Add(_categoryFilter);
         toolbar.Controls.Add(_pageSize);
         toolbar.Controls.Add(addButton);
+        toolbar.Controls.Add(restoreButton);
         toolbar.Controls.Add(exportButton);
         toolbar.Controls.Add(excelButton);
+        toolbar.Controls.Add(printButton);
         addButton.Click += async (_, _) => await AddProductAsync();
+        restoreButton.Click += async (_, _) => await RestoreSelectedAsync();
         exportButton.Click += async (_, _) => await ExportAsync();
         excelButton.Click += async (_, _) => await ExportExcelAsync();
+        printButton.Click += async (_, _) => await PrintAsync();
         _searchBox.TextChanged += (_, _) => RefreshFilterChanged();
         _categoryFilter.SelectedIndexChanged += (_, _) => RefreshFilterChanged();
         _pageSize.SelectedIndexChanged += (_, _) => RefreshFilterChanged();
@@ -106,8 +121,9 @@ public sealed class ProductsForm : Form
         var contextMenu = new ContextMenuStrip();
         contextMenu.Items.Add("Edit", null, async (_, _) => await EditSelectedAsync()).Enabled = _session.IsAdmin;
         contextMenu.Items.Add("Delete", null, async (_, _) => await DeleteSelectedAsync()).Enabled = _session.IsAdmin;
+        contextMenu.Items.Add("Restore Stock", null, async (_, _) => await RestoreSelectedAsync()).Enabled = _session.IsAdmin;
         contextMenu.Items.Add("Record Sale", null, (_, _) => MessageBox.Show("Sales workflow is being added in the next phase.", "Sales", MessageBoxButtons.OK, MessageBoxIcon.Information));
-        contextMenu.Items.Add("View History", null, (_, _) => MessageBox.Show("History workflow is being added in the next phase.", "History", MessageBoxButtons.OK, MessageBoxIcon.Information));
+        contextMenu.Items.Add("View History", null, async (_, _) => await ShowHistoryAsync()).Enabled = _session.IsAdmin;
         _grid.ContextMenuStrip = contextMenu;
     }
 
@@ -228,6 +244,40 @@ public sealed class ProductsForm : Form
         }
     }
 
+    private async Task RestoreSelectedAsync()
+    {
+        if (_grid.CurrentRow?.DataBoundItem is not Product product)
+        {
+            MessageBox.Show(this, "Select a product first.", "Restore stock", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new StockRestoreForm(_productService, _session, product);
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task ShowHistoryAsync()
+    {
+        if (_grid.CurrentRow?.DataBoundItem is not Product product)
+        {
+            MessageBox.Show(this, "Select a product first.", "History", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new AuditLogsForm(_auditLogService, _session, "Product", product.ProductId)
+        {
+            FormBorderStyle = FormBorderStyle.Sizable,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimumSize = new Size(900, 420),
+            ClientSize = new Size(1_100, 560)
+        };
+        dialog.ShowDialog(this);
+        await Task.CompletedTask;
+    }
+
     private async Task ExportAsync()
     {
         using var dialog = new SaveFileDialog { Filter = "CSV files (*.csv)|*.csv", FileName = "products.csv" };
@@ -261,6 +311,67 @@ public sealed class ProductsForm : Form
         MessageBox.Show(this, "Formatted spreadsheet exported successfully.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    private async Task PrintAsync()
+    {
+        try
+        {
+            if (PrinterSettings.InstalledPrinters.Count == 0)
+            {
+                ShowPrinterUnavailableMessage("No printer is installed.");
+                return;
+            }
+
+            _printProducts = await LoadProductsForExportAsync();
+            _printIndex = 0;
+            _printDocument.PrintController = new PreviewPrintController();
+            _printDocument.PrintPage -= PrintDocumentOnPrintPage;
+            _printDocument.PrintPage += PrintDocumentOnPrintPage;
+            using var preview = new PrintPreviewDialog { Document = _printDocument, Width = 1_000, Height = 700 };
+            preview.ShowDialog(this);
+        }
+        catch (InvalidPrinterException)
+        {
+            ShowPrinterUnavailableMessage("No valid printer is available.");
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1722 || exception.Message.Contains("RPC", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowPrinterUnavailableMessage("The Windows Print Spooler service is unavailable.");
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to print products", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowPrinterUnavailableMessage(string reason) =>
+        MessageBox.Show(this, $"{reason}\n\nStart the Windows Print Spooler service or install Microsoft Print to PDF, then try again.", "Print unavailable", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+    private void PrintDocumentOnPrintPage(object? sender, PrintPageEventArgs e)
+    {
+        using var font = new Font("Segoe UI", 8);
+        using var titleFont = new Font("Segoe UI", 13, FontStyle.Bold);
+        var y = e.MarginBounds.Top;
+        e.Graphics?.DrawString("Products", titleFont, Brushes.Black, e.MarginBounds.Left, y);
+        y += 30;
+        e.Graphics?.DrawString("SKU                 Name                         Category             Price       Quantity", font, Brushes.Black, e.MarginBounds.Left, y);
+        y += 20;
+
+        while (_printIndex < _printProducts.Count)
+        {
+            var product = _printProducts[_printIndex++];
+            var line = $"{product.Sku,-20}{product.Name,-30}{product.CategoryName,-20}{product.Price,10:N2}{product.Quantity,12:N0}";
+            e.Graphics?.DrawString(line, font, Brushes.Black, e.MarginBounds.Left, y);
+            y += 18;
+            if (y + 18 > e.MarginBounds.Bottom)
+            {
+                e.HasMorePages = _printIndex < _printProducts.Count;
+                return;
+            }
+        }
+
+        e.HasMorePages = false;
+    }
+
     private async Task<List<Product>> LoadProductsForExportAsync()
     {
         var categoryId = _categoryFilter.SelectedValue is int selectedCategoryId && selectedCategoryId > 0 ? (int?)selectedCategoryId : null;
@@ -278,6 +389,23 @@ public sealed class ProductsForm : Form
     private async void OnInventoryChanged(object? sender, EventArgs e)
     {
         await LoadAsync();
+    }
+
+    private async void OnCategoryChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            _suppressFilterEvents = true;
+            await LoadCategoriesAsync();
+            _suppressFilterEvents = false;
+            _page = 0;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _suppressFilterEvents = false;
+            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to refresh categories", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     protected override async void OnLoad(EventArgs e)

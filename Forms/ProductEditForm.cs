@@ -39,9 +39,11 @@ public sealed class ProductEditForm : Form
         AcceptButton = saveButton;
         CancelButton = cancelButton;
 
+        _skuTextBox.PlaceholderText = "Leave blank to generate automatically";
+        _skuTextBox.ReadOnly = _existingProduct is not null;
         var fields = new (string Label, Control Control)[]
         {
-            ("SKU", _skuTextBox),
+            ("SKU (optional)", _skuTextBox),
             ("Name", _nameTextBox),
             ("Category", _categoryComboBox),
             ("Price", _priceInput),
@@ -109,7 +111,7 @@ public sealed class ProductEditForm : Form
             var product = new Product
             {
                 ProductId = _existingProduct?.ProductId ?? 0,
-                Sku = _skuTextBox.Text,
+                Sku = _skuTextBox.Text.Trim(),
                 Name = _nameTextBox.Text,
                 CategoryId = categoryId,
                 Price = _priceInput.Value,
@@ -128,7 +130,7 @@ public sealed class ProductEditForm : Form
             DialogResult = DialogResult.OK;
             Close();
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        catch (Exception exception)
         {
             _errorLabel.Text = UserMessageFormatter.From(exception);
         }

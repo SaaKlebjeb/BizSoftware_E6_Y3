@@ -33,7 +33,7 @@ public sealed class ProductService(IProductRepository productRepository, ICatego
     public async Task<int> CreateAsync(Session session, Product product, CancellationToken cancellationToken = default)
     {
         authorizationService.EnsureAdmin(session);
-        Validate(product);
+        Validate(product, isNew: true);
         var productId = await productRepository.CreateAsync(product, cancellationToken);
         InventoryEvents.RaiseProductChanged();
         return productId;
@@ -42,8 +42,30 @@ public sealed class ProductService(IProductRepository productRepository, ICatego
     public async Task UpdateAsync(Session session, Product product, CancellationToken cancellationToken = default)
     {
         authorizationService.EnsureAdmin(session);
-        Validate(product);
+        Validate(product, isNew: false);
         await productRepository.UpdateAsync(product, cancellationToken);
+        InventoryEvents.RaiseProductChanged();
+    }
+
+    public async Task RestoreStockAsync(Session session, int productId, int quantity, string reason, CancellationToken cancellationToken = default)
+    {
+        authorizationService.EnsureAdmin(session);
+        if (productId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(productId));
+        }
+
+        if (quantity <= 0)
+        {
+            throw new ArgumentException("The restore quantity must be greater than zero.", nameof(quantity));
+        }
+
+        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 1_000)
+        {
+            throw new ArgumentException("A reason is required and must be no longer than 1,000 characters.", nameof(reason));
+        }
+
+        await productRepository.RestoreStockAsync(productId, quantity, session.UserId, reason.Trim(), cancellationToken);
         InventoryEvents.RaiseProductChanged();
     }
 
@@ -59,11 +81,11 @@ public sealed class ProductService(IProductRepository productRepository, ICatego
         InventoryEvents.RaiseProductChanged();
     }
 
-    private static void Validate(Product product)
+    private static void Validate(Product product, bool isNew)
     {
-        if (string.IsNullOrWhiteSpace(product.Sku) || product.Sku.Length > 50)
+        if ((!isNew && string.IsNullOrWhiteSpace(product.Sku)) || product.Sku.Length > 50)
         {
-            throw new ArgumentException("SKU is required and must be no longer than 50 characters.");
+            throw new ArgumentException("SKU must be no longer than 50 characters. Leave it blank only when creating a product to generate it automatically.");
         }
 
         if (string.IsNullOrWhiteSpace(product.Name) || product.Name.Length > 200)

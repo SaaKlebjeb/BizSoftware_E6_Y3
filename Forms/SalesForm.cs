@@ -1,6 +1,7 @@
 using InventoryManagementSystem.Events;
 using InventoryManagementSystem.Models;
 using InventoryManagementSystem.Services;
+using InventoryManagementSystem.Utils;
 
 namespace InventoryManagementSystem.Forms;
 
@@ -9,19 +10,22 @@ public sealed class SalesForm : Form
     private readonly ProductService _productService;
     private readonly SalesService _salesService;
     private readonly Session _session;
+    private readonly string _applicationName;
     private readonly ComboBox _productPicker = new() { DropDownStyle = ComboBoxStyle.DropDownList, Name = "saleProductPicker" };
     private readonly NumericUpDown _quantityPicker = new() { Minimum = 1, Maximum = 10_000, Value = 1, Name = "saleQuantityPicker" };
     private readonly DataGridView _cartGrid = new() { Name = "saleCartGrid" };
     private readonly Label _totalLabel = new() { AutoSize = true, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
     private readonly Label _statusLabel = new() { AutoSize = true, ForeColor = Color.Firebrick };
+    private readonly Button _previewButton = new() { Text = "Preview invoice", AutoSize = true };
     private readonly List<SaleLineRequest> _cart = [];
     private IReadOnlyList<Product> _products = [];
 
-    public SalesForm(ProductService productService, SalesService salesService, Session session)
+    public SalesForm(ProductService productService, SalesService salesService, Session session, string applicationName = "Inventory Management System")
     {
         _productService = productService;
         _salesService = salesService;
         _session = session;
+        _applicationName = applicationName;
         Text = "Sales";
         FormBorderStyle = FormBorderStyle.None;
         Dock = DockStyle.Fill;
@@ -36,13 +40,14 @@ public sealed class SalesForm : Form
         _productPicker.Width = 260;
         _quantityPicker.Width = 80;
         var addButton = new Button { Text = "Add to sale", AutoSize = true };
-        var recordButton = new Button { Text = "Record sale", AutoSize = true, BackColor = Color.FromArgb(30, 115, 190), ForeColor = Color.White };
+        _previewButton.BackColor = Color.FromArgb(30, 115, 190);
+        _previewButton.ForeColor = Color.White;
         toolbar.Controls.Add(_productPicker);
         toolbar.Controls.Add(_quantityPicker);
         toolbar.Controls.Add(addButton);
-        toolbar.Controls.Add(recordButton);
+        toolbar.Controls.Add(_previewButton);
         addButton.Click += (_, _) => AddToCart();
-        recordButton.Click += async (_, _) => await RecordSaleAsync();
+        _previewButton.Click += async (_, _) => await PreviewInvoiceAsync();
 
         ConfigureGrid();
         var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64, FlowDirection = FlowDirection.RightToLeft };
@@ -96,21 +101,31 @@ public sealed class SalesForm : Form
         _statusLabel.Text = string.Empty;
     }
 
-    private async Task RecordSaleAsync()
+    private async Task PreviewInvoiceAsync()
     {
         try
         {
-            var saleId = await _salesService.RecordSaleAsync(_session, _cart);
-            _cart.Clear();
-            RefreshCart();
-            _statusLabel.ForeColor = Color.DarkGreen;
-            _statusLabel.Text = $"Sale #{saleId} recorded successfully.";
-            await LoadProductsAsync();
+            if (_cart.Count == 0)
+            {
+                _statusLabel.Text = "Add at least one product before preparing an invoice.";
+                return;
+            }
+
+            var preparedSale = await _salesService.PrepareSaleAsync(_session, _cart);
+            using var invoice = new InvoicePreviewForm(_salesService, _session, preparedSale, _applicationName);
+            if (invoice.ShowDialog(this) == DialogResult.OK && invoice.RecordedSaleId is int saleId)
+            {
+                _cart.Clear();
+                RefreshCart();
+                _statusLabel.ForeColor = Color.DarkGreen;
+                _statusLabel.Text = $"Sale #{saleId} recorded successfully.";
+                await LoadProductsAsync();
+            }
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        catch (Exception exception)
         {
             _statusLabel.ForeColor = Color.Firebrick;
-            _statusLabel.Text = exception.Message;
+            _statusLabel.Text = UserMessageFormatter.From(exception);
         }
     }
 
@@ -128,11 +143,21 @@ public sealed class SalesForm : Form
             .ToList();
         _cartGrid.DataSource = rows;
         _totalLabel.Text = $"Total: {rows.Sum(row => row.Subtotal):N2}";
+        _previewButton.Enabled = rows.Count > 0;
     }
 
     private async void OnProductsChanged(object? sender, EventArgs e)
     {
-        await LoadProductsAsync();
+        try
+        {
+            await LoadProductsAsync();
+            RefreshCart();
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.ForeColor = Color.Firebrick;
+            _statusLabel.Text = UserMessageFormatter.From(exception);
+        }
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -145,7 +170,7 @@ public sealed class SalesForm : Form
         }
         catch (Exception exception)
         {
-            _statusLabel.Text = exception.Message;
+            _statusLabel.Text = UserMessageFormatter.From(exception);
         }
     }
 }

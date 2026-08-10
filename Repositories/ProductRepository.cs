@@ -72,13 +72,34 @@ public sealed class ProductRepository(IDbConnectionFactory connectionFactory, ID
     {
         await using var connection = ConnectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        await using var command = CreateCommand(connection, $"""
-            INSERT INTO Products (SKU, Name, CategoryId, Price, Quantity, LowStockThreshold)
-            VALUES (@SKU, @Name, @CategoryId, @Price, @Quantity, @LowStockThreshold);
-            {DatabaseProvider.GetLastInsertIdSql}
-            """);
-        AddProductParameters(command, product);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var sku = string.IsNullOrWhiteSpace(product.Sku) ? $"TMP-{Guid.NewGuid():N}" : product.Sku.Trim();
+            await using var command = CreateCommand(connection, $"""
+                INSERT INTO Products (SKU, Name, CategoryId, Price, Quantity, LowStockThreshold)
+                VALUES (@SKU, @Name, @CategoryId, @Price, @Quantity, @LowStockThreshold);
+                {DatabaseProvider.GetLastInsertIdSql}
+                """, transaction);
+            AddProductParameters(command, product, sku);
+            var productId = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+
+            if (string.IsNullOrWhiteSpace(product.Sku))
+            {
+                await using var skuCommand = CreateCommand(connection, "UPDATE Products SET SKU = @GeneratedSku, UpdatedAt = CURRENT_TIMESTAMP WHERE ProductId = @ProductId;", transaction);
+                AddParameter(skuCommand, "@GeneratedSku", $"SKU-{productId:D6}");
+                AddParameter(skuCommand, "@ProductId", productId);
+                await skuCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return productId;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task UpdateAsync(Product product, CancellationToken cancellationToken = default)
@@ -91,9 +112,47 @@ public sealed class ProductRepository(IDbConnectionFactory connectionFactory, ID
                 Quantity = @Quantity, LowStockThreshold = @LowStockThreshold, UpdatedAt = CURRENT_TIMESTAMP
             WHERE ProductId = @ProductId;
             """);
-        AddProductParameters(command, product);
+        AddProductParameters(command, product, product.Sku);
         AddParameter(command, "@ProductId", product.ProductId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task RestoreStockAsync(int productId, int quantity, int userId, string reason, CancellationToken cancellationToken = default)
+    {
+        await using var connection = ConnectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            await using var updateCommand = CreateCommand(connection, """
+                UPDATE Products
+                SET Quantity = Quantity + @Quantity, UpdatedAt = CURRENT_TIMESTAMP
+                WHERE ProductId = @ProductId;
+                """, transaction);
+            AddParameter(updateCommand, "@Quantity", quantity);
+            AddParameter(updateCommand, "@ProductId", productId);
+            if (await updateCommand.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                throw new InvalidOperationException("The selected product no longer exists.");
+            }
+
+            await using var auditCommand = CreateCommand(connection, """
+                INSERT INTO AuditLogs (UserId, Action, EntityName, EntityId, Description)
+                VALUES (@UserId, 'RESTORE_STOCK', 'Product', @ProductId, @Description);
+                """, transaction);
+            AddParameter(auditCommand, "@UserId", userId);
+            AddParameter(auditCommand, "@ProductId", productId);
+            AddParameter(auditCommand, "@Description", $"Restored {quantity:N0} unit(s). Reason: {reason}");
+            await auditCommand.ExecuteNonQueryAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<bool> HasSalesAsync(int productId, CancellationToken cancellationToken = default)
@@ -114,9 +173,9 @@ public sealed class ProductRepository(IDbConnectionFactory connectionFactory, ID
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private void AddProductParameters(System.Data.Common.DbCommand command, Product product)
+    private void AddProductParameters(System.Data.Common.DbCommand command, Product product, string sku)
     {
-        AddParameter(command, "@SKU", product.Sku.Trim());
+        AddParameter(command, "@SKU", sku.Trim());
         AddParameter(command, "@Name", product.Name.Trim());
         AddParameter(command, "@CategoryId", product.CategoryId);
         AddParameter(command, "@Price", product.Price);
