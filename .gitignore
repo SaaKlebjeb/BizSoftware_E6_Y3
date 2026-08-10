@@ -1,0 +1,42 @@
+# Visual Studio and IDE files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# .NET build output
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+TestResults/
+
+# NuGet and generated packages
+packages/
+*.nupkg
+*.snupkg
+
+# Local application data
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+
+# Local logs and temporary files
+logs/
+*.log
+*.tmp
+*.temp
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Publish and coverage output
+publish/
+coverage/

@@ -1,0 +1,5 @@
+IF DB_ID(N'InventoryDB') IS NULL
+BEGIN
+    CREATE DATABASE InventoryDB;
+END;
+GO
