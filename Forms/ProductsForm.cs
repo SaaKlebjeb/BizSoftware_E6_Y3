@@ -11,6 +11,7 @@ public sealed class ProductsForm : Form
 {
     private readonly ProductService _productService;
     private readonly AuditLogService _auditLogService;
+    private readonly SettingsService _settingsService;
     private readonly Session _session;
     private readonly TextBox _searchBox = new() { Name = "productSearchBox", PlaceholderText = "Search name, SKU, or category" };
     private readonly ComboBox _categoryFilter = new() { Name = "categoryFilter", DropDownStyle = ComboBoxStyle.DropDownList };
@@ -27,10 +28,11 @@ public sealed class ProductsForm : Form
     private IReadOnlyList<Product> _printProducts = [];
     private int _printIndex;
 
-    public ProductsForm(ProductService productService, AuditLogService auditLogService, Session session)
+    public ProductsForm(ProductService productService, AuditLogService auditLogService, SettingsService settingsService, Session session)
     {
         _productService = productService;
         _auditLogService = auditLogService;
+        _settingsService = settingsService;
         _session = session;
         Text = "Products";
         FormBorderStyle = FormBorderStyle.None;
@@ -38,10 +40,12 @@ public sealed class ProductsForm : Form
         BuildUi();
         InventoryEvents.ProductChanged += OnInventoryChanged;
         InventoryEvents.CategoryChanged += OnCategoryChanged;
+        InventoryEvents.SettingsChanged += OnSettingsChanged;
         FormClosed += (_, _) =>
         {
             InventoryEvents.ProductChanged -= OnInventoryChanged;
             InventoryEvents.CategoryChanged -= OnCategoryChanged;
+            InventoryEvents.SettingsChanged -= OnSettingsChanged;
             _loadCancellation?.Cancel();
             _loadCancellation?.Dispose();
         };
@@ -57,6 +61,8 @@ public sealed class ProductsForm : Form
         _pageSize.SelectedItem = 25;
         var addButton = new Button { Text = "Add Product", AutoSize = true, Visible = _session.IsAdmin };
         var restoreButton = new Button { Text = "Restore Stock", AutoSize = true, Visible = _session.IsAdmin };
+        var templateButton = new Button { Text = "Download Template", AutoSize = true, Visible = _session.IsAdmin };
+        var importButton = new Button { Text = "Import Excel", AutoSize = true, Visible = _session.IsAdmin };
         var exportButton = new Button { Text = "Export CSV", AutoSize = true };
         var excelButton = new Button { Text = "Export Excel", AutoSize = true };
         var printButton = new Button { Text = "Print preview", AutoSize = true };
@@ -65,11 +71,15 @@ public sealed class ProductsForm : Form
         toolbar.Controls.Add(_pageSize);
         toolbar.Controls.Add(addButton);
         toolbar.Controls.Add(restoreButton);
+        toolbar.Controls.Add(templateButton);
+        toolbar.Controls.Add(importButton);
         toolbar.Controls.Add(exportButton);
         toolbar.Controls.Add(excelButton);
         toolbar.Controls.Add(printButton);
         addButton.Click += async (_, _) => await AddProductAsync();
         restoreButton.Click += async (_, _) => await RestoreSelectedAsync();
+        templateButton.Click += (_, _) => DownloadImportTemplate();
+        importButton.Click += async (_, _) => await ImportProductsAsync();
         exportButton.Click += async (_, _) => await ExportAsync();
         excelButton.Click += async (_, _) => await ExportExcelAsync();
         printButton.Click += async (_, _) => await PrintAsync();
@@ -187,6 +197,24 @@ public sealed class ProductsForm : Form
         _categoryFilter.ValueMember = nameof(Category.CategoryId);
     }
 
+    private async Task LoadDisplaySettingsAsync()
+    {
+        var pageSize = await _settingsService.GetAsync("DefaultPageSize");
+        if (int.TryParse(pageSize, out var parsedPageSize) && parsedPageSize >= 1 && parsedPageSize <= 500)
+        {
+            if (!_pageSize.Items.Contains(parsedPageSize))
+            {
+                _pageSize.Items.Add(parsedPageSize);
+            }
+
+            _pageSize.SelectedItem = parsedPageSize;
+        }
+        else if (_pageSize.SelectedItem is null)
+        {
+            _pageSize.SelectedItem = 25;
+        }
+    }
+
     private void RefreshFilterChanged()
     {
         if (_suppressFilterEvents)
@@ -259,6 +287,58 @@ public sealed class ProductsForm : Form
         }
     }
 
+    private void DownloadImportTemplate()
+    {
+        using var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "product-import-template.xlsx" };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            _productService.ExportImportTemplate(_session, dialog.FileName);
+            MessageBox.Show(this, "Product import template downloaded successfully.", "Template", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to download template", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task ImportProductsAsync()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Filter = "Excel workbook (*.xlsx)|*.xlsx",
+            Title = "Select product import file",
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _productService.ImportFromExcelAsync(_session, dialog.FileName);
+            if (result.Errors.Count > 0)
+            {
+                var visibleErrors = string.Join(Environment.NewLine, result.Errors.Take(12));
+                var extra = result.Errors.Count > 12 ? $"{Environment.NewLine}...and {result.Errors.Count - 12} more issue(s)." : string.Empty;
+                MessageBox.Show(this, $"{visibleErrors}{extra}", "Import validation failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            await LoadAsync();
+            MessageBox.Show(this, $"{result.ImportedCount:N0} product(s) imported successfully.", "Import", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to import products", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     private async Task ShowHistoryAsync()
     {
         if (_grid.CurrentRow?.DataBoundItem is not Product product)
@@ -292,22 +372,27 @@ public sealed class ProductsForm : Form
         {
             products.AddRange(await _productService.GetPageAsync(_session, _searchBox.Text, categoryId, offset, 100));
         }
+        var rows = BuildProductExportRows(products);
         CsvExporter.Export(dialog.FileName,
             new[] { "SKU", "Name", "Category", "Price", "Quantity", "Low Stock Threshold" },
-            products.Select(product => new object?[] { product.Sku, product.Name, product.CategoryName, product.Price, product.Quantity, product.LowStockThreshold }));
+            rows);
         MessageBox.Show(this, "Products exported successfully.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private async Task ExportExcelAsync()
     {
-        using var dialog = new SaveFileDialog { Filter = "Excel-compatible files (*.xls)|*.xls|HTML files (*.html)|*.html", FileName = "products.xls" };
+        using var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "products.xlsx" };
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
         var products = await LoadProductsForExportAsync();
-        CsvExporter.ExportHtmlTable(dialog.FileName, "Products", new[] { "SKU", "Name", "Category", "Price", "Quantity", "Low Stock Threshold" }, products.Select(product => new object?[] { product.Sku, product.Name, product.CategoryName, product.Price.ToString("N2"), product.Quantity, product.LowStockThreshold }));
+        SpreadsheetExporter.ExportXlsx(
+            dialog.FileName,
+            "Products",
+            new[] { "SKU", "Name", "Category", "Price", "Quantity", "Low Stock Threshold" },
+            BuildProductExportRows(products));
         MessageBox.Show(this, "Formatted spreadsheet exported successfully.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
@@ -384,6 +469,17 @@ public sealed class ProductsForm : Form
         return products;
     }
 
+    private static IEnumerable<object?[]> BuildProductExportRows(IEnumerable<Product> products) =>
+        products.Select(product => new object?[]
+        {
+            product.Sku,
+            product.Name,
+            product.CategoryName,
+            product.Price.ToString("N2"),
+            product.Quantity,
+            product.LowStockThreshold
+        });
+
     private int PageSize => _pageSize.SelectedItem is int size ? size : 25;
 
     private async void OnInventoryChanged(object? sender, EventArgs e)
@@ -408,12 +504,30 @@ public sealed class ProductsForm : Form
         }
     }
 
+    private async void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            _suppressFilterEvents = true;
+            await LoadDisplaySettingsAsync();
+            _suppressFilterEvents = false;
+            _page = 0;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _suppressFilterEvents = false;
+            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to refresh settings", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
         try
         {
             _suppressFilterEvents = true;
+            await LoadDisplaySettingsAsync();
             await LoadCategoriesAsync();
             _suppressFilterEvents = false;
             await LoadAsync();

@@ -1,5 +1,6 @@
 using InventoryManagementSystem.DataAccess;
 using InventoryManagementSystem.Models;
+using InventoryManagementSystem.Utils;
 
 namespace InventoryManagementSystem.Repositories;
 
@@ -39,21 +40,27 @@ public sealed class ReportRepository(IDbConnectionFactory connectionFactory, IDa
         var rows = new List<DailySalesRow>();
         await using var connection = ConnectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        var dayExpression = DatabaseProvider.Name == "SqlServer" ? "CONVERT(date, s.SaleDate)" : "date(s.SaleDate)";
         await using var command = CreateCommand(connection, $"""
-            SELECT {dayExpression} AS SaleDay, COUNT(*) AS NumberOfSales, SUM(s.TotalAmount) AS TotalSales
+            SELECT s.SaleDate, s.TotalAmount
             FROM Sales s
             WHERE s.SaleDate >= @StartDate AND s.SaleDate < @EndDate
-            GROUP BY {dayExpression}
-            ORDER BY SaleDay;
+            ORDER BY s.SaleDate;
             """);
         AddParameter(command, "@StartDate", start);
         AddParameter(command, "@EndDate", end);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var groupedRows = new Dictionary<DateTime, (int Count, decimal Total)>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            rows.Add(new DailySalesRow { Date = Convert.ToDateTime(reader.GetValue(0)), NumberOfSales = Convert.ToInt32(reader.GetValue(1)), TotalSales = Convert.ToDecimal(reader.GetValue(2)) });
+            var saleDate = DateTimeHelper.ToLocalDate(reader.GetDateTime(0));
+            var totalAmount = reader.GetDecimal(1);
+            groupedRows.TryGetValue(saleDate, out var current);
+            groupedRows[saleDate] = (current.Count + 1, current.Total + totalAmount);
         }
+
+        rows.AddRange(groupedRows
+            .OrderBy(row => row.Key)
+            .Select(row => new DailySalesRow { Date = row.Key, NumberOfSales = row.Value.Count, TotalSales = row.Value.Total }));
 
         return rows;
     }

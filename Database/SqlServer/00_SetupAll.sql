@@ -143,6 +143,18 @@ INSERT INTO dbo.Settings ([Key], [Value])
 SELECT N'LowStockDefault', N'10'
 WHERE NOT EXISTS (SELECT 1 FROM dbo.Settings WHERE [Key] = N'LowStockDefault');
 
+INSERT INTO dbo.Settings ([Key], [Value])
+SELECT N'DefaultPageSize', N'25'
+WHERE NOT EXISTS (SELECT 1 FROM dbo.Settings WHERE [Key] = N'DefaultPageSize');
+
+INSERT INTO dbo.Settings ([Key], [Value])
+SELECT N'CurrencySymbol', N'$'
+WHERE NOT EXISTS (SELECT 1 FROM dbo.Settings WHERE [Key] = N'CurrencySymbol');
+
+INSERT INTO dbo.Settings ([Key], [Value])
+SELECT N'ReceiptFooter', N'Thank you for your business.'
+WHERE NOT EXISTS (SELECT 1 FROM dbo.Settings WHERE [Key] = N'ReceiptFooter');
+
 INSERT INTO dbo.Categories (Name, Description)
 SELECT N'General', N'General inventory items'
 WHERE NOT EXISTS (SELECT 1 FROM dbo.Categories WHERE Name = N'General');

@@ -15,6 +15,9 @@ public sealed class LoginForm : Form
     private readonly TextBox _registerPassword = new() { Name = "registerPassword", UseSystemPasswordChar = true };
     private readonly TextBox _registerConfirmation = new() { Name = "registerConfirmation", UseSystemPasswordChar = true };
     private readonly Label _statusLabel = new() { AutoSize = true, ForeColor = Color.Firebrick };
+    private TabControl? _tabs;
+    private Button? _signInButton;
+    private Button? _registerButton;
 
     public LoginForm(AppConfig configuration)
     {
@@ -22,75 +25,165 @@ public sealed class LoginForm : Form
         _services = new ApplicationServices(configuration);
         Text = _configuration.ApplicationName;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(460, 360);
-        ClientSize = new Size(560, 420);
+        BackColor = Color.FromArgb(243, 247, 251);
+        MinimumSize = new Size(860, 620);
+        ClientSize = new Size(960, 680);
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
         BuildUi();
     }
 
     private void BuildUi()
     {
+        var header = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 108,
+            BackColor = Color.FromArgb(24, 79, 144),
+            Padding = new Padding(28, 18, 28, 18)
+        };
+
         var title = new Label
         {
             Dock = DockStyle.Top,
-            Height = 56,
-            Font = new Font("Segoe UI", 18, FontStyle.Bold),
+            Height = 42,
+            Font = new Font("Segoe UI", 20, FontStyle.Bold),
+            ForeColor = Color.White,
             Text = _configuration.ApplicationName,
-            TextAlign = ContentAlignment.MiddleCenter
+            TextAlign = ContentAlignment.MiddleLeft
         };
 
-        var tabs = new TabControl { Dock = DockStyle.Fill, Name = "authenticationTabs" };
-        tabs.TabPages.Add(BuildSignInPage());
-        tabs.TabPages.Add(BuildRegistrationPage());
+        var subtitle = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 26,
+            Font = new Font("Segoe UI", 10.5f, FontStyle.Regular),
+            ForeColor = Color.FromArgb(220, 230, 245),
+            Text = "Secure sign in and registration",
+            TextAlign = ContentAlignment.MiddleLeft
+        };
 
-        var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24) };
-        container.Controls.Add(tabs);
+        header.Controls.Add(subtitle);
+        header.Controls.Add(title);
+
+        _tabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            Name = "authenticationTabs",
+            Font = new Font("Segoe UI", 10F),
+            ItemSize = new Size(100, 28),
+            SizeMode = TabSizeMode.Fixed
+        };
+        _tabs.SelectedIndexChanged += (_, _) => UpdateAcceptButton();
+        _tabs.TabPages.Add(BuildSignInPage());
+        _tabs.TabPages.Add(BuildRegistrationPage());
+
+        var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(28, 22, 28, 18), BackColor = BackColor };
+        container.Controls.Add(_tabs);
         Controls.Add(container);
+        Controls.Add(header);
         Controls.Add(_statusLabel);
         _statusLabel.Dock = DockStyle.Bottom;
         _statusLabel.Height = 34;
-        _statusLabel.Padding = new Padding(24, 6, 24, 0);
+        _statusLabel.Padding = new Padding(28, 6, 28, 0);
+        _statusLabel.ForeColor = Color.Firebrick;
+
+        UpdateAcceptButton();
     }
 
     private TabPage BuildSignInPage()
     {
-        var page = new TabPage("Sign In") { Padding = new Padding(20) };
-        var signInButton = new Button { Text = "Sign In", AutoSize = true, Name = "signInButton" };
-        signInButton.Click += async (_, _) => await SignInAsync();
+        var page = new TabPage("Sign In")
+        {
+            Padding = new Padding(22),
+            BackColor = Color.White
+        };
+
+        _signInButton = CreatePrimaryButton("Sign In", "signInButton");
+        _signInButton.Click += async (_, _) => await SignInAsync();
         page.Controls.Add(CreateFormLayout(
             ("Username", _loginUsername),
             ("Password", _loginPassword),
-            ("", signInButton)));
+            ("", _signInButton)));
         return page;
     }
 
     private TabPage BuildRegistrationPage()
     {
-        var page = new TabPage("Register") { Padding = new Padding(20) };
-        var registerButton = new Button { Text = "Register", AutoSize = true, Name = "registerButton" };
-        registerButton.Click += async (_, _) => await RegisterAsync();
+        var page = new TabPage("Register")
+        {
+            Padding = new Padding(22),
+            BackColor = Color.White
+        };
+
+        _registerButton = CreatePrimaryButton("Register", "registerButton");
+        _registerButton.Click += async (_, _) => await RegisterAsync();
         page.Controls.Add(CreateFormLayout(
             ("Username", _registerUsername),
             ("Full name", _registerFullName),
             ("Password", _registerPassword),
             ("Confirm password", _registerConfirmation),
-            ("", registerButton)));
+            ("", _registerButton)));
         return page;
+    }
+
+    private static Button CreatePrimaryButton(string text, string name)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Name = name,
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            BackColor = Color.FromArgb(28, 112, 200),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Padding = new Padding(10, 6, 10, 6),
+            MinimumSize = new Size(120, 38)
+        };
+
+        button.FlatAppearance.BorderColor = Color.FromArgb(18, 83, 145);
+        button.FlatAppearance.BorderSize = 1;
+        return button;
     }
 
     private static TableLayoutPanel CreateFormLayout(params (string Label, Control Control)[] fields)
     {
-        var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = fields.Length, Padding = new Padding(4) };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = fields.Length,
+            Padding = new Padding(8),
+            BackColor = Color.White
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (var row = 0; row < fields.Length; row++)
         {
             var field = fields[row];
-            layout.Controls.Add(new Label { Text = field.Label, AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 7, 0, 0) }, 0, row);
+            layout.Controls.Add(new Label
+            {
+                Text = field.Label,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Padding = new Padding(0, 9, 0, 0),
+                ForeColor = Color.FromArgb(45, 45, 45),
+                Font = new Font("Segoe UI", 10F, FontStyle.Regular)
+            }, 0, row);
             field.Control.Dock = DockStyle.Top;
+            field.Control.Font = new Font("Segoe UI", 10F);
+            field.Control.Margin = new Padding(0, 4, 0, 8);
             layout.Controls.Add(field.Control, 1, row);
         }
 
         return layout;
+    }
+
+    private void UpdateAcceptButton()
+    {
+        AcceptButton = _tabs?.SelectedTab?.Text == "Register" ? _registerButton : _signInButton;
     }
 
     private async Task SignInAsync()

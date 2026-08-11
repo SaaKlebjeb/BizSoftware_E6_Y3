@@ -1,4 +1,5 @@
 using InventoryManagementSystem.Configuration;
+using InventoryManagementSystem.Events;
 using InventoryManagementSystem.Services;
 using InventoryManagementSystem.Utils;
 
@@ -13,10 +14,12 @@ public sealed class MainForm : Form
     private readonly Label _contentTitle = new() { AutoSize = true, Font = new Font("Segoe UI", 20, FontStyle.Bold) };
     private readonly Label _contentDescription = new() { AutoSize = true, MaximumSize = new Size(700, 0) };
     private readonly Label _statusLabel = new() { Dock = DockStyle.Bottom, Height = 28, Padding = new Padding(12, 5, 0, 0) };
+    private readonly Label _headerTitle = new() { AutoSize = true, Font = new Font("Segoe UI", 14, FontStyle.Bold), Dock = DockStyle.Left };
     private Panel? _sidebar;
     private bool _sidebarExpanded = true;
     private bool _logoutRequested;
     private Button? _activeMenuButton;
+    private string _applicationName;
 
     public bool ExitApplicationRequested { get; private set; }
 
@@ -25,22 +28,26 @@ public sealed class MainForm : Form
         _configuration = configuration;
         _services = services;
         _session = session;
-        Text = _configuration.ApplicationName;
+        _applicationName = _configuration.ApplicationName;
+        Text = _applicationName;
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(960, 620);
         WindowState = FormWindowState.Maximized;
         BuildUi();
+        Load += async (_, _) => await LoadSettingsAsync();
+        InventoryEvents.SettingsChanged += OnSettingsChanged;
+        FormClosed += (_, _) => InventoryEvents.SettingsChanged -= OnSettingsChanged;
         Shown += (_, _) => ShowDashboard();
     }
 
     private void BuildUi()
     {
         var header = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = Color.White, Padding = new Padding(16, 10, 16, 10) };
-        var title = new Label { AutoSize = true, Font = new Font("Segoe UI", 14, FontStyle.Bold), Text = _configuration.ApplicationName, Dock = DockStyle.Left };
+        _headerTitle.Text = _applicationName;
         var toggle = new Button { Text = "☰", Width = 42, Dock = DockStyle.Right, Name = "sidebarToggle" };
         toggle.Click += (_, _) => ToggleSidebar();
         header.Controls.Add(toggle);
-        header.Controls.Add(title);
+        header.Controls.Add(_headerTitle);
 
         _sidebar = BuildSidebar();
         var contentHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(28) };
@@ -177,7 +184,7 @@ public sealed class MainForm : Form
     private void ShowProducts()
     {
         _contentPanel.Controls.Clear();
-        var productsForm = new ProductsForm(_services.Products, _services.AuditLogs, _session)
+        var productsForm = new ProductsForm(_services.Products, _services.AuditLogs, _services.Settings, _session)
         {
             TopLevel = false,
             FormBorderStyle = FormBorderStyle.None,
@@ -190,7 +197,7 @@ public sealed class MainForm : Form
     private void ShowSales()
     {
         _contentPanel.Controls.Clear();
-        var salesForm = new SalesForm(_services.Products, _services.Sales, _session, _configuration.ApplicationName)
+        var salesForm = new SalesForm(_services.Products, _services.Sales, _services.Settings, _session, _applicationName)
         {
             TopLevel = false,
             FormBorderStyle = FormBorderStyle.None,
@@ -277,6 +284,28 @@ public sealed class MainForm : Form
         };
         _contentPanel.Controls.Add(settingsForm);
         settingsForm.Show();
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            var applicationName = await _services.Settings.GetAsync("ApplicationName");
+            if (!string.IsNullOrWhiteSpace(applicationName))
+            {
+                _applicationName = applicationName.Trim();
+                Text = _applicationName;
+                _headerTitle.Text = _applicationName;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        await LoadSettingsAsync();
     }
 
     private void ToggleSidebar()

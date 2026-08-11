@@ -12,6 +12,8 @@ public sealed class InvoicePreviewForm : Form
     private readonly Session _session;
     private readonly Sale _sale;
     private readonly string _applicationName;
+    private readonly string _currencySymbol;
+    private readonly string _receiptFooter;
     private readonly DataGridView _itemsGrid = new() { Name = "invoiceItemsGrid" };
     private readonly Label _totalLabel = new() { AutoSize = true, Font = new Font("Segoe UI", 14, FontStyle.Bold) };
     private readonly Label _statusLabel = new() { AutoSize = true, ForeColor = Color.Firebrick };
@@ -22,12 +24,14 @@ public sealed class InvoicePreviewForm : Form
 
     public int? RecordedSaleId { get; private set; }
 
-    public InvoicePreviewForm(SalesService salesService, Session session, Sale sale, string applicationName = "Inventory Management System")
+    public InvoicePreviewForm(SalesService salesService, Session session, Sale sale, string applicationName = "Inventory Management System", string currencySymbol = "$", string receiptFooter = "")
     {
         _salesService = salesService;
         _session = session;
         _sale = sale;
         _applicationName = string.IsNullOrWhiteSpace(applicationName) ? "Inventory Management System" : applicationName.Trim();
+        _currencySymbol = string.IsNullOrWhiteSpace(currencySymbol) ? "$" : currencySymbol.Trim();
+        _receiptFooter = receiptFooter?.Trim() ?? string.Empty;
         Text = "Invoice preview - confirm sale";
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(760, 500);
@@ -44,9 +48,15 @@ public sealed class InvoicePreviewForm : Form
 
         ConfigureGrid();
         var totalPanel = new Panel { Dock = DockStyle.Bottom, Height = 58, Padding = new Padding(24, 8, 24, 8) };
-        _totalLabel.Text = $"Total: {_sale.TotalAmount:N2}";
+        _totalLabel.Text = $"Total: {FormatMoney(_sale.TotalAmount)}";
         _totalLabel.Dock = DockStyle.Right;
         totalPanel.Controls.Add(_totalLabel);
+
+        var footerPanel = new Panel { Dock = DockStyle.Bottom, Height = string.IsNullOrWhiteSpace(_receiptFooter) ? 0 : 40, Padding = new Padding(24, 0, 24, 8) };
+        if (!string.IsNullOrWhiteSpace(_receiptFooter))
+        {
+            footerPanel.Controls.Add(new Label { Text = _receiptFooter, AutoSize = true, Dock = DockStyle.Left, ForeColor = Color.FromArgb(90, 90, 90) });
+        }
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 56, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(24, 8, 24, 8) };
         var cancelButton = new Button { Text = "Back", AutoSize = true, DialogResult = DialogResult.Cancel };
@@ -65,6 +75,7 @@ public sealed class InvoicePreviewForm : Form
 
         Controls.Add(_itemsGrid);
         Controls.Add(totalPanel);
+        Controls.Add(footerPanel);
         Controls.Add(buttons);
         Controls.Add(_statusLabel);
         Controls.Add(header);
@@ -207,9 +218,9 @@ public sealed class InvoicePreviewForm : Form
             x += productWidth;
             DrawCell(graphics, item.Quantity.ToString("N0"), font, Brushes.Black, new RectangleF(x, y, quantityWidth, rowHeight), rightFormat);
             x += quantityWidth;
-            DrawCell(graphics, item.UnitPrice.ToString("N2"), font, Brushes.Black, new RectangleF(x, y, unitPriceWidth, rowHeight), rightFormat);
+            DrawCell(graphics, FormatMoney(item.UnitPrice), font, Brushes.Black, new RectangleF(x, y, unitPriceWidth, rowHeight), rightFormat);
             x += unitPriceWidth;
-            DrawCell(graphics, item.Subtotal.ToString("N2"), font, Brushes.Black, new RectangleF(x, y, subtotalWidth, rowHeight), rightFormat);
+            DrawCell(graphics, FormatMoney(item.Subtotal), font, Brushes.Black, new RectangleF(x, y, subtotalWidth, rowHeight), rightFormat);
             graphics.DrawLine(linePen, left, y + rowHeight, right, y + rowHeight);
             y += rowHeight;
 
@@ -224,12 +235,19 @@ public sealed class InvoicePreviewForm : Form
         graphics.DrawLine(linePen, left + tableWidth * 0.60f, y, right, y);
         y += 12;
         graphics.DrawString("TOTAL", boldFont, Brushes.Black, left + tableWidth * 0.60f, y);
-        graphics.DrawString(_sale.TotalAmount.ToString("N2"), titleFont, Brushes.Black, new RectangleF(right - tableWidth * 0.35f, y - 4, tableWidth * 0.35f, 32), rightFormat);
+        graphics.DrawString(FormatMoney(_sale.TotalAmount), titleFont, Brushes.Black, new RectangleF(right - tableWidth * 0.35f, y - 4, tableWidth * 0.35f, 32), rightFormat);
+        y += 44;
+        if (!string.IsNullOrWhiteSpace(_receiptFooter))
+        {
+            graphics.DrawString(_receiptFooter, font, grayBrush, new RectangleF(left, y, tableWidth, 34), leftFormat);
+        }
         e.HasMorePages = false;
     }
 
     private static void DrawCell(Graphics graphics, string value, Font font, Brush brush, RectangleF bounds, StringFormat format) =>
         graphics.DrawString(value, font, brush, bounds, format);
+
+    private string FormatMoney(decimal value) => $"{_currencySymbol}{value:N2}";
 }
 
 public sealed record InvoiceRow(string Sku, string Product, int Quantity, decimal UnitPrice, decimal Subtotal);

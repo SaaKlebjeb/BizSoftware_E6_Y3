@@ -9,8 +9,11 @@ public sealed class SalesForm : Form
 {
     private readonly ProductService _productService;
     private readonly SalesService _salesService;
+    private readonly SettingsService _settingsService;
     private readonly Session _session;
-    private readonly string _applicationName;
+    private string _applicationName;
+    private string _currencySymbol = "$";
+    private string _receiptFooter = string.Empty;
     private readonly ComboBox _productPicker = new() { DropDownStyle = ComboBoxStyle.DropDownList, Name = "saleProductPicker" };
     private readonly NumericUpDown _quantityPicker = new() { Minimum = 1, Maximum = 10_000, Value = 1, Name = "saleQuantityPicker" };
     private readonly DataGridView _cartGrid = new() { Name = "saleCartGrid" };
@@ -20,10 +23,11 @@ public sealed class SalesForm : Form
     private readonly List<SaleLineRequest> _cart = [];
     private IReadOnlyList<Product> _products = [];
 
-    public SalesForm(ProductService productService, SalesService salesService, Session session, string applicationName = "Inventory Management System")
+    public SalesForm(ProductService productService, SalesService salesService, SettingsService settingsService, Session session, string applicationName = "Inventory Management System")
     {
         _productService = productService;
         _salesService = salesService;
+        _settingsService = settingsService;
         _session = session;
         _applicationName = applicationName;
         Text = "Sales";
@@ -31,7 +35,12 @@ public sealed class SalesForm : Form
         Dock = DockStyle.Fill;
         BuildUi();
         InventoryEvents.ProductChanged += OnProductsChanged;
-        FormClosed += (_, _) => InventoryEvents.ProductChanged -= OnProductsChanged;
+        InventoryEvents.SettingsChanged += OnSettingsChanged;
+        FormClosed += (_, _) =>
+        {
+            InventoryEvents.ProductChanged -= OnProductsChanged;
+            InventoryEvents.SettingsChanged -= OnSettingsChanged;
+        };
     }
 
     private void BuildUi()
@@ -112,7 +121,7 @@ public sealed class SalesForm : Form
             }
 
             var preparedSale = await _salesService.PrepareSaleAsync(_session, _cart);
-            using var invoice = new InvoicePreviewForm(_salesService, _session, preparedSale, _applicationName);
+            using var invoice = new InvoicePreviewForm(_salesService, _session, preparedSale, _applicationName, _currencySymbol, _receiptFooter);
             if (invoice.ShowDialog(this) == DialogResult.OK && invoice.RecordedSaleId is int saleId)
             {
                 _cart.Clear();
@@ -142,7 +151,7 @@ public sealed class SalesForm : Form
             })
             .ToList();
         _cartGrid.DataSource = rows;
-        _totalLabel.Text = $"Total: {rows.Sum(row => row.Subtotal):N2}";
+        _totalLabel.Text = $"Total: {FormatMoney(rows.Sum(row => row.Subtotal))}";
         _previewButton.Enabled = rows.Count > 0;
     }
 
@@ -165,6 +174,7 @@ public sealed class SalesForm : Form
         base.OnLoad(e);
         try
         {
+            await LoadDisplaySettingsAsync();
             await LoadProductsAsync();
             RefreshCart();
         }
@@ -173,6 +183,38 @@ public sealed class SalesForm : Form
             _statusLabel.Text = UserMessageFormatter.From(exception);
         }
     }
+
+    private async Task LoadDisplaySettingsAsync()
+    {
+        var applicationName = await _settingsService.GetAsync("ApplicationName");
+        if (!string.IsNullOrWhiteSpace(applicationName))
+        {
+            _applicationName = applicationName.Trim();
+        }
+
+        var currencySymbol = await _settingsService.GetAsync("CurrencySymbol");
+        _currencySymbol = string.IsNullOrWhiteSpace(currencySymbol) ? "$" : currencySymbol.Trim();
+
+        var receiptFooter = await _settingsService.GetAsync("ReceiptFooter");
+        _receiptFooter = string.IsNullOrWhiteSpace(receiptFooter) ? string.Empty : receiptFooter.Trim();
+        Text = $"{_applicationName} - Sales";
+    }
+
+    private async void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            await LoadDisplaySettingsAsync();
+            RefreshCart();
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.ForeColor = Color.Firebrick;
+            _statusLabel.Text = UserMessageFormatter.From(exception);
+        }
+    }
+
+    private string FormatMoney(decimal value) => $"{_currencySymbol}{value:N2}";
 }
 
 public sealed record SaleCartRow(string ProductName, int Quantity, decimal UnitPrice, decimal Subtotal);

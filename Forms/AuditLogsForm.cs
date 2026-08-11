@@ -92,8 +92,8 @@ public sealed class AuditLogsForm : Form
     {
         try
         {
-            var startDate = _startDate.Value.Date;
-            var endDate = _endDate.Value.Date.AddDays(1);
+            var startDate = ToUtcStart(_startDate.Value);
+            var endDate = ToUtcEnd(_endDate.Value);
             if (endDate <= startDate)
             {
                 throw new ArgumentException("The end date must be on or after the start date.");
@@ -116,15 +116,15 @@ public sealed class AuditLogsForm : Form
     {
         using var dialog = new SaveFileDialog
         {
-            Filter = "Excel-compatible files (*.xls)|*.xls|HTML files (*.html)|*.html",
-            FileName = "audit-logs.xls"
+            Filter = "Excel workbook (*.xlsx)|*.xlsx",
+            FileName = "audit-logs.xlsx"
         };
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        CsvExporter.ExportHtmlTable(
+        SpreadsheetExporter.ExportXlsx(
             dialog.FileName,
             $"Audit Logs ({_startDate.Value:d} - {_endDate.Value:d})",
             new[] { "Date", "User", "Action", "Entity", "Entity ID", "Description" },
@@ -201,4 +201,10 @@ public sealed class AuditLogsForm : Form
         base.OnLoad(e);
         await LoadAsync();
     }
+
+    private static DateTime ToUtcStart(DateTime localDate) =>
+        DateTime.SpecifyKind(localDate.Date, DateTimeKind.Local).ToUniversalTime();
+
+    private static DateTime ToUtcEnd(DateTime localDate) =>
+        DateTime.SpecifyKind(localDate.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime();
 }

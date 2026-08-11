@@ -102,6 +102,79 @@ public sealed class ProductRepository(IDbConnectionFactory connectionFactory, ID
         }
     }
 
+    public async Task<int> CreateManyAsync(IReadOnlyList<Product> products, CancellationToken cancellationToken = default)
+    {
+        if (products.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var connection = ConnectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            foreach (var product in products)
+            {
+                var sku = string.IsNullOrWhiteSpace(product.Sku) ? $"TMP-{Guid.NewGuid():N}" : product.Sku.Trim();
+                await using var command = CreateCommand(connection, $"""
+                    INSERT INTO Products (SKU, Name, CategoryId, Price, Quantity, LowStockThreshold)
+                    VALUES (@SKU, @Name, @CategoryId, @Price, @Quantity, @LowStockThreshold);
+                    {DatabaseProvider.GetLastInsertIdSql}
+                    """, transaction);
+                AddProductParameters(command, product, sku);
+                var productId = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+
+                if (string.IsNullOrWhiteSpace(product.Sku))
+                {
+                    await using var skuCommand = CreateCommand(connection, "UPDATE Products SET SKU = @GeneratedSku, UpdatedAt = CURRENT_TIMESTAMP WHERE ProductId = @ProductId;", transaction);
+                    AddParameter(skuCommand, "@GeneratedSku", $"SKU-{productId:D6}");
+                    AddParameter(skuCommand, "@ProductId", productId);
+                    await skuCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return products.Count;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> FindExistingSkusAsync(IEnumerable<string> skus, CancellationToken cancellationToken = default)
+    {
+        var skuList = skus
+            .Select(sku => sku.Trim())
+            .Where(sku => sku.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (skuList.Count == 0)
+        {
+            return [];
+        }
+
+        await using var connection = ConnectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        var placeholders = string.Join(", ", skuList.Select((_, index) => $"@SKU{index}"));
+        await using var command = CreateCommand(connection, $"SELECT SKU FROM Products WHERE SKU IN ({placeholders});");
+        for (var index = 0; index < skuList.Count; index++)
+        {
+            AddParameter(command, $"@SKU{index}", skuList[index]);
+        }
+
+        var existingSkus = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            existingSkus.Add(reader.GetString(0));
+        }
+
+        return existingSkus;
+    }
+
     public async Task UpdateAsync(Product product, CancellationToken cancellationToken = default)
     {
         await using var connection = ConnectionFactory.CreateConnection();

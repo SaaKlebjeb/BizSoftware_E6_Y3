@@ -19,6 +19,8 @@ public sealed class ReportsForm : Form
     private readonly Chart _topProductsChart = CreateChart("Top products");
     private readonly PrintDocument _printDocument = new();
     private readonly Label _status = new() { AutoSize = true, ForeColor = Color.Firebrick };
+    private IReadOnlyList<DailySalesRow> _loadedDaily = [];
+    private IReadOnlyList<TopProductRow> _loadedTopProducts = [];
 
     public ReportsForm(ReportService reportService, Session session)
     {
@@ -36,7 +38,7 @@ public sealed class ReportsForm : Form
     {
         var toolbar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, WrapContents = false };
         var refresh = new Button { Text = "Run report", AutoSize = true };
-        var export = new Button { Text = "Export CSV", AutoSize = true };
+        var export = new Button { Text = "Export Excel", AutoSize = true };
         var print = new Button { Text = "Print preview", AutoSize = true };
         toolbar.Controls.Add(new Label { Text = "From", AutoSize = true, Padding = new Padding(0, 8, 0, 0) });
         toolbar.Controls.Add(_startDate);
@@ -88,8 +90,12 @@ public sealed class ReportsForm : Form
     {
         try
         {
-            var daily = await _reportService.GetDailySalesAsync(_session, _startDate.Value, _endDate.Value);
-            var topProducts = await _reportService.GetTopProductsAsync(_session, _startDate.Value, _endDate.Value);
+            var startDate = ToUtcStart(_startDate.Value);
+            var endDate = ToUtcEnd(_endDate.Value);
+            var daily = await _reportService.GetDailySalesAsync(_session, startDate, endDate);
+            var topProducts = await _reportService.GetTopProductsAsync(_session, startDate, endDate);
+            _loadedDaily = daily;
+            _loadedTopProducts = topProducts;
             _dailyGrid.DataSource = daily.ToList();
             _topProductsGrid.DataSource = topProducts.ToList();
             UpdateCharts(daily, topProducts);
@@ -105,15 +111,30 @@ public sealed class ReportsForm : Form
 
     private void ExportDailySales()
     {
-        if (_dailyGrid.DataSource is not IEnumerable<DailySalesRow> rows)
+        if (_loadedDaily.Count == 0 && _loadedTopProducts.Count == 0)
         {
             return;
         }
 
-        using var dialog = new SaveFileDialog { Filter = "CSV files (*.csv)|*.csv", FileName = "daily-sales.csv" };
+        using var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "sales-report.xlsx" };
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            CsvExporter.Export(dialog.FileName, new[] { "Date", "Number of Sales", "Total Sales" }, rows.Select(row => new object?[] { row.Date, row.NumberOfSales, row.TotalSales }));
+            SpreadsheetExporter.ExportWorkbook(dialog.FileName, new[]
+            {
+                new SpreadsheetExporter.SpreadsheetSheet(
+                    "Daily Sales",
+                    new[] { "Date", "Number of Sales", "Total Sales" },
+                    _loadedDaily.Select(row => new object?[] { row.Date, row.NumberOfSales, row.TotalSales }),
+                    "Daily Sales Report",
+                    $"From {_startDate.Value:d} to {_endDate.Value:d}"),
+                new SpreadsheetExporter.SpreadsheetSheet(
+                    "Top Products",
+                    new[] { "Product", "Quantity Sold", "Revenue" },
+                    _loadedTopProducts.Select(row => new object?[] { row.Product, row.QuantitySold, row.Revenue }),
+                    "Top Products Report",
+                    $"From {_startDate.Value:d} to {_endDate.Value:d}")
+            });
+            MessageBox.Show(this, "Sales report exported successfully.", "Export", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
@@ -156,7 +177,7 @@ public sealed class ReportsForm : Form
 
     private void ShowPrinterUnavailableMessage(string reason)
     {
-        MessageBox.Show(this, $"{reason}\n\nStart the Windows Print Spooler service or install Microsoft Print to PDF, then try again. You can still export the report to CSV.", "Print unavailable", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(this, $"{reason}\n\nStart the Windows Print Spooler service or install Microsoft Print to PDF, then try again. You can still export the report to Excel.", "Print unavailable", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void PrintDocumentOnPrintPage(object? sender, PrintPageEventArgs e)
@@ -186,4 +207,10 @@ public sealed class ReportsForm : Form
         chart.Series.Add(new Series("Values") { ChartType = title.StartsWith("Daily", StringComparison.Ordinal) ? SeriesChartType.Line : SeriesChartType.Bar, IsValueShownAsLabel = true });
         return chart;
     }
+
+    private static DateTime ToUtcStart(DateTime localDate) =>
+        DateTime.SpecifyKind(localDate.Date, DateTimeKind.Local).ToUniversalTime();
+
+    private static DateTime ToUtcEnd(DateTime localDate) =>
+        DateTime.SpecifyKind(localDate.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime();
 }
