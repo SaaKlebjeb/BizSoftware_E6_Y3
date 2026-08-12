@@ -24,6 +24,11 @@ public static class SpreadsheetExporter
             throw new ArgumentException("At least one sheet is required.", nameof(sheets));
         }
 
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+
         using var archive = ZipFile.Open(filePath, ZipArchiveMode.Create);
         WriteEntry(archive, "[Content_Types].xml", BuildContentTypesXml(sheets.Count));
         WriteEntry(archive, "_rels/.rels", BuildRootRelationshipsXml());

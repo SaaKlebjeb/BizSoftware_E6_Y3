@@ -52,7 +52,7 @@ public sealed class ProductService(IProductRepository productRepository, ICatego
             .Select(category => new object?[] { category.Name })
             .ToList();
 
-        IReadOnlyList<SpreadsheetExporter.SpreadsheetDataValidation> dataValidations = categoryRows.Count == 0
+        IReadOnlyList<SpreadsheetExporter.SpreadsheetDataValidation> dataValidations = (categoryRows.Count == 0 || string.IsNullOrEmpty($"'Categories'!$A$2:$A${categoryRows.Count + 1}"))
             ? []
             : [new SpreadsheetExporter.SpreadsheetDataValidation("C4:C1048576", $"'Categories'!$A$2:$A${categoryRows.Count + 1}")];
 
@@ -160,6 +160,33 @@ public sealed class ProductService(IProductRepository productRepository, ICatego
         await productRepository.DeleteAsync(productId, cancellationToken);
         await auditLogService.LogAsync(session, "Delete", "Product", productId, null, $"Deleted product ID: {productId}");
         InventoryEvents.RaiseProductChanged();
+    }
+
+    public async Task<(int DeletedCount, int SkippedCount)> DeleteManyAsync(Session session, IEnumerable<int> productIds, CancellationToken cancellationToken = default)
+    {
+        authorizationService.EnsureAdmin(session);
+        var ids = productIds.ToList();
+        var deletableIds = new List<int>();
+        var skippedCount = 0;
+
+        foreach (var id in ids)
+        {
+            if (await productRepository.HasSalesAsync(id, cancellationToken))
+            {
+                skippedCount++;
+                continue;
+            }
+            deletableIds.Add(id);
+        }
+
+        if (deletableIds.Count > 0)
+        {
+            await productRepository.DeleteManyAsync(deletableIds, cancellationToken);
+            await auditLogService.LogAsync(session, "BatchDelete", "Product", null, null, $"Deleted {deletableIds.Count} products. {skippedCount} skipped due to sales history.");
+            InventoryEvents.RaiseProductChanged();
+        }
+
+        return (deletableIds.Count, skippedCount);
     }
 
     private static void Validate(Product product, bool isNew)

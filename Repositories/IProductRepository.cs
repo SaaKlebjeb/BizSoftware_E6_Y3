@@ -14,4 +14,5 @@ public interface IProductRepository
     Task RestoreStockAsync(int productId, int quantity, int userId, string reason, CancellationToken cancellationToken = default);
     Task<bool> HasSalesAsync(int productId, CancellationToken cancellationToken = default);
     Task DeleteAsync(int productId, CancellationToken cancellationToken = default);
+    Task DeleteManyAsync(IEnumerable<int> productIds, CancellationToken cancellationToken = default);
 }

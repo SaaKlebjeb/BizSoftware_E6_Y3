@@ -21,6 +21,7 @@ public sealed class ProductsForm : Form
     private readonly Label _pageLabel = new() { AutoSize = true, Padding = new Padding(8, 8, 8, 0) };
     private readonly Button _previousPage = new() { Text = "Previous", AutoSize = true };
     private readonly Button _nextPage = new() { Text = "Next", AutoSize = true };
+    private readonly System.Windows.Forms.Timer _searchTimer = new() { Interval = 400 };
     private CancellationTokenSource? _loadCancellation;
     private bool _suppressFilterEvents = true;
     private int _page;
@@ -38,6 +39,11 @@ public sealed class ProductsForm : Form
         FormBorderStyle = FormBorderStyle.None;
         Dock = DockStyle.Fill;
         BuildUi();
+        _searchTimer.Tick += (_, _) =>
+        {
+            _searchTimer.Stop();
+            RefreshFilterChanged();
+        };
         InventoryEvents.ProductChanged += OnInventoryChanged;
         InventoryEvents.CategoryChanged += OnCategoryChanged;
         InventoryEvents.SettingsChanged += OnSettingsChanged;
@@ -46,6 +52,8 @@ public sealed class ProductsForm : Form
             InventoryEvents.ProductChanged -= OnInventoryChanged;
             InventoryEvents.CategoryChanged -= OnCategoryChanged;
             InventoryEvents.SettingsChanged -= OnSettingsChanged;
+            _searchTimer.Stop();
+            _searchTimer.Dispose();
             _loadCancellation?.Cancel();
             _loadCancellation?.Dispose();
         };
@@ -66,10 +74,12 @@ public sealed class ProductsForm : Form
         var exportButton = new Button { Text = "Export CSV", AutoSize = true };
         var excelButton = new Button { Text = "Export Excel", AutoSize = true };
         var printButton = new Button { Text = "Print preview", AutoSize = true };
+        var bulkDeleteButton = new Button { Text = "Delete Selected", AutoSize = true, Visible = _session.IsAdmin, ForeColor = Color.Firebrick };
         toolbar.Controls.Add(_searchBox);
         toolbar.Controls.Add(_categoryFilter);
         toolbar.Controls.Add(_pageSize);
         toolbar.Controls.Add(addButton);
+        toolbar.Controls.Add(bulkDeleteButton);
         toolbar.Controls.Add(restoreButton);
         toolbar.Controls.Add(templateButton);
         toolbar.Controls.Add(importButton);
@@ -77,13 +87,18 @@ public sealed class ProductsForm : Form
         toolbar.Controls.Add(excelButton);
         toolbar.Controls.Add(printButton);
         addButton.Click += async (_, _) => await AddProductAsync();
+        bulkDeleteButton.Click += async (_, _) => await DeleteSelectedBatchAsync();
         restoreButton.Click += async (_, _) => await RestoreSelectedAsync();
         templateButton.Click += (_, _) => DownloadImportTemplate();
         importButton.Click += async (_, _) => await ImportProductsAsync();
         exportButton.Click += async (_, _) => await ExportAsync();
         excelButton.Click += async (_, _) => await ExportExcelAsync();
         printButton.Click += async (_, _) => await PrintAsync();
-        _searchBox.TextChanged += (_, _) => RefreshFilterChanged();
+        _searchBox.TextChanged += (_, _) =>
+        {
+            _searchTimer.Stop();
+            _searchTimer.Start();
+        };
         _categoryFilter.SelectedIndexChanged += (_, _) => RefreshFilterChanged();
         _pageSize.SelectedIndexChanged += (_, _) => RefreshFilterChanged();
 
@@ -104,7 +119,7 @@ public sealed class ProductsForm : Form
     {
         _grid.Dock = DockStyle.Fill;
         _grid.AllowUserToAddRows = false;
-        _grid.ReadOnly = true;
+        _grid.ReadOnly = false;
         _grid.AutoGenerateColumns = false;
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.MultiSelect = false;
@@ -120,13 +135,40 @@ public sealed class ProductsForm : Form
         _grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(30, 115, 190), ForeColor = Color.White, Font = new Font("Segoe UI", 10, FontStyle.Bold), Alignment = DataGridViewContentAlignment.MiddleLeft };
         _grid.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = Color.FromArgb(25, 25, 25), SelectionBackColor = Color.FromArgb(44, 125, 194), SelectionForeColor = Color.White, Padding = new Padding(5, 0, 5, 0) };
         _grid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(245, 247, 250) };
+        
+        var checkBoxColumn = new DataGridViewCheckBoxColumn
+        {
+            HeaderText = "Select",
+            DataPropertyName = nameof(Product.IsSelected),
+            Width = 60,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            Resizable = DataGridViewTriState.False,
+            ReadOnly = false
+        };
+        _grid.Columns.Add(checkBoxColumn);
+
         AddColumn("SKU", nameof(Product.Sku));
         AddColumn("Name", nameof(Product.Name));
         AddColumn("Category", nameof(Product.CategoryName));
         AddColumn("Price", nameof(Product.Price), "N2");
         AddColumn("Quantity", nameof(Product.Quantity));
         AddColumn("Low-stock threshold", nameof(Product.LowStockThreshold));
-        _grid.CellDoubleClick += async (_, args) => { if (args.RowIndex >= 0) await EditSelectedAsync(); };
+        
+        _grid.CellPainting += (sender, e) => {
+            if (e.RowIndex == -1 && e.ColumnIndex == 0)
+            {
+                e.PaintBackground(e.ClipBounds, true);
+                var checkBoxBounds = new Rectangle(e.CellBounds.X + 22, e.CellBounds.Y + 10, 16, 16);
+                ControlPaint.DrawCheckBox(e.Graphics, checkBoxBounds, _grid.Rows.Cast<DataGridViewRow>().All(r => r.DataBoundItem is Product p && p.IsSelected) ? ButtonState.Checked : ButtonState.Normal);
+                e.Handled = true;
+            }
+        };
+
+        _grid.CellDoubleClick += async (_, args) => { if (args.RowIndex >= 0 && args.ColumnIndex > 0) await EditSelectedAsync(); };
+        _grid.CellContentClick += (sender, e) => {
+            if (e.RowIndex >= 0 && e.ColumnIndex == 0) _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            else if (e.RowIndex == -1 && e.ColumnIndex == 0) ToggleSelectAll();
+        };
 
         var contextMenu = new ContextMenuStrip();
         contextMenu.Items.Add("Edit", null, async (_, _) => await EditSelectedAsync()).Enabled = _session.IsAdmin;
@@ -137,6 +179,16 @@ public sealed class ProductsForm : Form
         _grid.ContextMenuStrip = contextMenu;
     }
 
+    private void ToggleSelectAll()
+    {
+        var allSelected = _grid.Rows.Cast<DataGridViewRow>().All(r => r.DataBoundItem is Product p && p.IsSelected);
+        foreach (var product in _grid.Rows.Cast<DataGridViewRow>().Select(r => r.DataBoundItem as Product).Where(p => p != null))
+        {
+            product!.IsSelected = !allSelected;
+        }
+        _grid.Invalidate();
+    }
+
     private void AddColumn(string header, string property, string? format = null)
     {
         _grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -144,8 +196,53 @@ public sealed class ProductsForm : Form
             HeaderText = header,
             DataPropertyName = property,
             SortMode = DataGridViewColumnSortMode.Automatic,
+            ReadOnly = true,
             DefaultCellStyle = format is null ? null : new DataGridViewCellStyle { Format = format }
         });
+    }
+
+    private async Task DeleteSelectedBatchAsync()
+    {
+        var selectedProducts = _grid.Rows.Cast<DataGridViewRow>()
+            .Select(r => r.DataBoundItem as Product)
+            .Where(p => p != null && p.IsSelected)
+            .Cast<Product>()
+            .ToList();
+
+        if (selectedProducts.Count == 0)
+        {
+            MessageBox.Show(this, "Select at least one product to delete.", "Batch delete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var message = selectedProducts.Count == 1 
+            ? $"Delete '{selectedProducts[0].Name}'?" 
+            : $"Delete {selectedProducts.Count} selected products?";
+
+        if (MessageBox.Show(this, message, "Confirm batch deletion", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            var (deletedCount, skippedCount) = await _productService.DeleteManyAsync(_session, selectedProducts.Select(p => p.ProductId));
+            
+            if (skippedCount > 0)
+            {
+                MessageBox.Show(this, $"Deleted {deletedCount} products. {skippedCount} products were skipped because they have sales history and cannot be deleted.", "Batch delete results", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, $"Successfully deleted {deletedCount} products.", "Batch delete success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, exception.Message, "Unable to delete products", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private async Task LoadAsync()
@@ -155,15 +252,28 @@ public sealed class ProductsForm : Form
             return;
         }
 
+        // Cancel previous load
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        
+        // Create new cancellation for this load
+        var cts = new CancellationTokenSource();
+        _loadCancellation = cts;
+        var token = cts.Token;
+
         try
         {
-            _loadCancellation?.Cancel();
-            _loadCancellation?.Dispose();
-            _loadCancellation = new CancellationTokenSource();
-            var cancellationToken = _loadCancellation.Token;
+            var searchText = _searchBox.Text;
             var categoryId = _categoryFilter.SelectedValue is int selectedCategoryId && selectedCategoryId > 0 ? (int?)selectedCategoryId : null;
-            _totalRows = await _productService.CountAsync(_session, _searchBox.Text, categoryId, cancellationToken);
-            var products = await _productService.GetPageAsync(_session, _searchBox.Text, categoryId, _page * PageSize, PageSize, cancellationToken);
+            
+            _totalRows = await _productService.CountAsync(_session, searchText, categoryId, token);
+            var products = await _productService.GetPageAsync(_session, searchText, categoryId, _page * PageSize, PageSize, token);
+            
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             _grid.DataSource = products.ToList();
             foreach (DataGridViewRow row in _grid.Rows)
             {
@@ -180,10 +290,15 @@ public sealed class ProductsForm : Form
         }
         catch (OperationCanceledException)
         {
+            // Expected when typing fast
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to load products", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            // Only show error if we weren't trying to cancel this operation anyway
+            if (!token.IsCancellationRequested)
+            {
+                MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to load products", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 
@@ -289,7 +404,12 @@ public sealed class ProductsForm : Form
 
     private async void DownloadImportTemplate()
     {
-        using var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "product-import-template.xlsx" };
+        using var dialog = new SaveFileDialog 
+        { 
+            Filter = "Excel workbook (*.xlsx)|*.xlsx", 
+            FileName = "product-import-template.xlsx",
+            OverwritePrompt = true
+        };
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -297,12 +417,20 @@ public sealed class ProductsForm : Form
 
         try
         {
+            if (File.Exists(dialog.FileName))
+            {
+                File.Delete(dialog.FileName);
+            }
             await _productService.ExportImportTemplateAsync(_session, dialog.FileName);
             MessageBox.Show(this, "Product import template downloaded successfully.", "Template", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+        catch (IOException)
+        {
+            MessageBox.Show(this, "The file is currently open in another program. Please close it and try again.", "File in use", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
         catch (Exception exception)
         {
-            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to download template", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, $"Error: {exception.Message}", "Unable to download template", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -319,10 +447,25 @@ public sealed class ProductsForm : Form
             return;
         }
 
-        using var previewForm = new ImportPreviewForm(_productService, _session, dialog.FileName);
-        if (previewForm.ShowDialog(this) == DialogResult.OK)
+        try
         {
-            await LoadAsync();
+            // Attempt to open the file to check if it's in use
+            using var stream = File.Open(dialog.FileName, FileMode.Open, FileAccess.Read, FileShare.None);
+            stream.Close();
+
+            using var previewForm = new ImportPreviewForm(_productService, _session, dialog.FileName);
+            if (previewForm.ShowDialog(this) == DialogResult.OK)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (IOException)
+        {
+            MessageBox.Show(this, "The file is currently open in another program. Please close it and try again.", "File in use", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, $"An error occurred while opening the file: {exception.Message}", "Import error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

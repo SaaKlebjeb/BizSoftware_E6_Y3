@@ -246,6 +246,23 @@ public sealed class ProductRepository(IDbConnectionFactory connectionFactory, ID
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task DeleteManyAsync(IEnumerable<int> productIds, CancellationToken cancellationToken = default)
+    {
+        var idList = productIds.ToList();
+        if (idList.Count == 0) return;
+
+        await using var connection = ConnectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        var placeholders = string.Join(", ", idList.Select((_, index) => $"@ID{index}"));
+        await using var command = CreateCommand(connection, $"DELETE FROM Products WHERE ProductId IN ({placeholders});");
+        for (var index = 0; index < idList.Count; index++)
+        {
+            AddParameter(command, $"@ID{index}", idList[index]);
+        }
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private void AddProductParameters(System.Data.Common.DbCommand command, Product product, string sku)
     {
         AddParameter(command, "@SKU", sku.Trim());

@@ -13,5 +13,6 @@ public sealed class Product
     public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
 
+    public bool IsSelected { get; set; }
     public bool IsLowStock => Quantity < LowStockThreshold;
 }

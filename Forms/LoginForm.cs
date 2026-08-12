@@ -35,36 +35,36 @@ public sealed class LoginForm : Form
 
     private void BuildUi()
     {
-        var header = new Panel
+        var header = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 108,
+            Height = 125,
             BackColor = Color.FromArgb(24, 79, 144),
-            Padding = new Padding(28, 18, 28, 18)
+            Padding = new Padding(28, 18, 28, 18),
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false
         };
 
         var title = new Label
         {
-            Dock = DockStyle.Top,
-            Height = 42,
-            Font = new Font("Segoe UI", 20, FontStyle.Bold),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 24, FontStyle.Bold),
             ForeColor = Color.White,
             Text = _configuration.ApplicationName,
-            TextAlign = ContentAlignment.MiddleLeft
+            Margin = new Padding(0, 0, 0, 5)
         };
 
         var subtitle = new Label
         {
-            Dock = DockStyle.Top,
-            Height = 26,
-            Font = new Font("Segoe UI", 10.5f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(220, 230, 245),
-            Text = "Secure sign in and registration",
-            TextAlign = ContentAlignment.MiddleLeft
+            AutoSize = true,
+            Font = new Font("Segoe UI", 12f, FontStyle.Regular),
+            ForeColor = Color.FromArgb(235, 240, 250),
+            Text = "Secure sign in and registration"
         };
 
-        header.Controls.Add(subtitle);
         header.Controls.Add(title);
+        header.Controls.Add(subtitle);
+
 
         _tabs = new TabControl
         {
