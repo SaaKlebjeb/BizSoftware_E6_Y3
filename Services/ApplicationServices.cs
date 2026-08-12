@@ -24,13 +24,13 @@ public sealed class ApplicationServices
         SettingsRepository = new SettingsRepository(connectionFactory, provider);
         Authentication = new AuthenticationService(UserRepository);
         Authorization = new AuthorizationService();
-        Products = new ProductService(ProductRepository, CategoryRepository, Authorization);
-        Categories = new CategoryService(CategoryRepository, Authorization);
-        Sales = new SalesService(SaleRepository, ProductRepository);
         AuditLogs = new AuditLogService(AuditLogRepository, Authorization);
+        Products = new ProductService(ProductRepository, CategoryRepository, Authorization, AuditLogs);
+        Categories = new CategoryService(CategoryRepository, Authorization, AuditLogs);
+        Sales = new SalesService(SaleRepository, ProductRepository);
         Dashboard = new DashboardService(DashboardRepository);
         Reports = new ReportService(ReportRepository);
-        Users = new UserService(UserRepository, Authorization);
+        Users = new UserService(UserRepository, Authorization, AuditLogs);
         Settings = new SettingsService(SettingsRepository, Authorization);
     }
 

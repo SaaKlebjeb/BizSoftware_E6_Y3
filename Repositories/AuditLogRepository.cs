@@ -11,13 +11,14 @@ public sealed class AuditLogRepository(IDbConnectionFactory connectionFactory, I
         await using var connection = ConnectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await using var command = CreateCommand(connection, """
-            INSERT INTO AuditLogs (UserId, Action, EntityName, EntityId, Description)
-            VALUES (@UserId, @Action, @EntityName, @EntityId, @Description);
+            INSERT INTO AuditLogs (UserId, Action, EntityName, EntityId, Sku, Description)
+            VALUES (@UserId, @Action, @EntityName, @EntityId, @Sku, @Description);
             """);
         AddParameter(command, "@UserId", auditLog.UserId);
         AddParameter(command, "@Action", auditLog.Action);
         AddParameter(command, "@EntityName", auditLog.EntityName);
         AddParameter(command, "@EntityId", auditLog.EntityId);
+        AddParameter(command, "@Sku", auditLog.Sku);
         AddParameter(command, "@Description", auditLog.Description);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -40,7 +41,7 @@ public sealed class AuditLogRepository(IDbConnectionFactory connectionFactory, I
         var query = DatabaseProvider.Name == "SqlServer"
             ? """
               SELECT TOP (@Limit) a.AuditLogId, a.UserId, COALESCE(u.Username, ''), a.Action,
-                     a.EntityName, a.EntityId, a.Description, a.CreatedAt
+                     a.EntityName, a.EntityId, a.Sku, a.Description, a.CreatedAt
               FROM AuditLogs a
               LEFT JOIN Users u ON u.UserId = a.UserId
               WHERE a.CreatedAt >= @StartDate AND a.CreatedAt < @EndDate
@@ -50,7 +51,7 @@ public sealed class AuditLogRepository(IDbConnectionFactory connectionFactory, I
               """
             : """
               SELECT a.AuditLogId, a.UserId, COALESCE(u.Username, ''), a.Action,
-                     a.EntityName, a.EntityId, a.Description, a.CreatedAt
+                     a.EntityName, a.EntityId, a.Sku, a.Description, a.CreatedAt
               FROM AuditLogs a
               LEFT JOIN Users u ON u.UserId = a.UserId
               WHERE a.CreatedAt >= @StartDate AND a.CreatedAt < @EndDate
@@ -76,8 +77,9 @@ public sealed class AuditLogRepository(IDbConnectionFactory connectionFactory, I
                 Action = reader.GetString(3),
                 EntityName = reader.GetString(4),
                 EntityId = reader.IsDBNull(5) ? null : reader.GetInt32(5),
-                Description = reader.GetString(6),
-                CreatedAt = reader.GetDateTime(7)
+                Sku = reader.IsDBNull(6) ? null : reader.GetString(6),
+                Description = reader.GetString(7),
+                CreatedAt = reader.GetDateTime(8)
             });
         }
 

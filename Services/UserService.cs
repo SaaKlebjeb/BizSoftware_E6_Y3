@@ -5,7 +5,7 @@ using InventoryManagementSystem.Utils;
 
 namespace InventoryManagementSystem.Services;
 
-public sealed class UserService(IUserRepository userRepository, AuthorizationService authorizationService)
+public sealed class UserService(IUserRepository userRepository, AuthorizationService authorizationService, AuditLogService auditLogService)
 {
     public async Task<IReadOnlyList<User>> GetAllAsync(Session session, CancellationToken cancellationToken = default)
     {
@@ -35,6 +35,7 @@ public sealed class UserService(IUserRepository userRepository, AuthorizationSer
 
         var (hash, salt) = PasswordHasher.HashPassword(password);
         var userId = await userRepository.CreateAsync(new User { Username = username, FullName = fullName, PasswordHash = hash, PasswordSalt = salt, Role = role, IsActive = true }, cancellationToken);
+        await auditLogService.LogAsync(session, "Create", "User", userId, null, $"Created user: {username} ({role})");
         InventoryEvents.RaiseUserChanged();
         return userId;
     }
@@ -43,6 +44,7 @@ public sealed class UserService(IUserRepository userRepository, AuthorizationSer
     {
         authorizationService.EnsureAdmin(session);
         await userRepository.SetRoleAsync(userId, role, cancellationToken);
+        await auditLogService.LogAsync(session, "UpdateRole", "User", userId, null, $"Set role to: {role}");
         InventoryEvents.RaiseUserChanged();
     }
 
@@ -55,6 +57,7 @@ public sealed class UserService(IUserRepository userRepository, AuthorizationSer
         }
 
         await userRepository.SetActiveAsync(userId, isActive, cancellationToken);
+        await auditLogService.LogAsync(session, isActive ? "Unlock" : "Lock", "User", userId, null, isActive ? "Account unlocked" : "Account locked");
         InventoryEvents.RaiseUserChanged();
     }
 }

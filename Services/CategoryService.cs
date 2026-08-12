@@ -4,7 +4,7 @@ using InventoryManagementSystem.Repositories;
 
 namespace InventoryManagementSystem.Services;
 
-public sealed class CategoryService(ICategoryRepository categoryRepository, AuthorizationService authorizationService)
+public sealed class CategoryService(ICategoryRepository categoryRepository, AuthorizationService authorizationService, AuditLogService auditLogService)
 {
     public Task<IReadOnlyList<Category>> GetAllAsync(Session session, CancellationToken cancellationToken = default)
     {
@@ -17,6 +17,7 @@ public sealed class CategoryService(ICategoryRepository categoryRepository, Auth
         authorizationService.EnsureAdmin(session);
         Validate(name, description);
         var categoryId = await categoryRepository.CreateAsync(name.Trim(), description.Trim(), cancellationToken);
+        await auditLogService.LogAsync(session, "Create", "Category", categoryId, null, $"Created category: {name}");
         InventoryEvents.RaiseCategoryChanged();
         return categoryId;
     }
@@ -27,6 +28,7 @@ public sealed class CategoryService(ICategoryRepository categoryRepository, Auth
         ArgumentNullException.ThrowIfNull(category);
         Validate(category.Name, category.Description);
         await categoryRepository.UpdateAsync(category, cancellationToken);
+        await auditLogService.LogAsync(session, "Update", "Category", category.CategoryId, null, $"Updated category: {category.Name}");
         InventoryEvents.RaiseCategoryChanged();
     }
 
@@ -44,6 +46,7 @@ public sealed class CategoryService(ICategoryRepository categoryRepository, Auth
         }
 
         await categoryRepository.DeleteAsync(categoryId, cancellationToken);
+        await auditLogService.LogAsync(session, "Delete", "Category", categoryId, null, $"Deleted category ID: {categoryId}");
         InventoryEvents.RaiseCategoryChanged();
     }
 

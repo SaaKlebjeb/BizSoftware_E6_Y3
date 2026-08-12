@@ -137,10 +137,10 @@ public sealed class ProductRepository(IDbConnectionFactory connectionFactory, ID
             await transaction.CommitAsync(cancellationToken);
             return products.Count;
         }
-        catch
+        catch (Exception ex)
         {
             await transaction.RollbackAsync(CancellationToken.None);
-            throw;
+            throw new InvalidOperationException($"Failed to import {products.Count} products. Transaction rolled back.", ex);
         }
     }
 

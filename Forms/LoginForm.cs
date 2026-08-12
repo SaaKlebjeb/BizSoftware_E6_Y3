@@ -170,7 +170,7 @@ public sealed class LoginForm : Form
                 Anchor = AnchorStyles.Left,
                 Padding = new Padding(0, 9, 0, 0),
                 ForeColor = Color.FromArgb(45, 45, 45),
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular)
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold)
             }, 0, row);
             field.Control.Dock = DockStyle.Top;
             field.Control.Font = new Font("Segoe UI", 10F);

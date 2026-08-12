@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS AuditLogs
     Action TEXT NOT NULL,
     EntityName TEXT NOT NULL,
     EntityId INTEGER,
+    Sku TEXT,
     Description TEXT NOT NULL,
     CreatedAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     FOREIGN KEY (UserId) REFERENCES Users(UserId)

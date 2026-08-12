@@ -8,6 +8,7 @@ public sealed class AuditLog
     public string Action { get; init; } = string.Empty;
     public string EntityName { get; init; } = string.Empty;
     public int? EntityId { get; init; }
+    public string? Sku { get; init; }
     public string Description { get; init; } = string.Empty;
     public DateTime CreatedAt { get; init; }
 }

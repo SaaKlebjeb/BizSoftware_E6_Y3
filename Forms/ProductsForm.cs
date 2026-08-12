@@ -287,7 +287,7 @@ public sealed class ProductsForm : Form
         }
     }
 
-    private void DownloadImportTemplate()
+    private async void DownloadImportTemplate()
     {
         using var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "product-import-template.xlsx" };
         if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -297,7 +297,7 @@ public sealed class ProductsForm : Form
 
         try
         {
-            _productService.ExportImportTemplate(_session, dialog.FileName);
+            await _productService.ExportImportTemplateAsync(_session, dialog.FileName);
             MessageBox.Show(this, "Product import template downloaded successfully.", "Template", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception exception)
@@ -319,23 +319,10 @@ public sealed class ProductsForm : Form
             return;
         }
 
-        try
+        using var previewForm = new ImportPreviewForm(_productService, _session, dialog.FileName);
+        if (previewForm.ShowDialog(this) == DialogResult.OK)
         {
-            var result = await _productService.ImportFromExcelAsync(_session, dialog.FileName);
-            if (result.Errors.Count > 0)
-            {
-                var visibleErrors = string.Join(Environment.NewLine, result.Errors.Take(12));
-                var extra = result.Errors.Count > 12 ? $"{Environment.NewLine}...and {result.Errors.Count - 12} more issue(s)." : string.Empty;
-                MessageBox.Show(this, $"{visibleErrors}{extra}", "Import validation failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
             await LoadAsync();
-            MessageBox.Show(this, $"{result.ImportedCount:N0} product(s) imported successfully.", "Import", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(this, UserMessageFormatter.From(exception), "Unable to import products", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

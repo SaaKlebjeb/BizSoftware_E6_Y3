@@ -86,6 +86,7 @@ BEGIN
         Action NVARCHAR(50) NOT NULL,
         EntityName NVARCHAR(100) NOT NULL,
         EntityId INT NULL,
+        Sku NVARCHAR(50) NULL,
         Description NVARCHAR(1000) NOT NULL,
         CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_AuditLogs_CreatedAt DEFAULT (SYSUTCDATETIME()),
         CONSTRAINT FK_AuditLogs_Users FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId)
