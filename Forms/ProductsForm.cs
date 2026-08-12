@@ -563,29 +563,81 @@ public sealed class ProductsForm : Form
 
     private void PrintDocumentOnPrintPage(object? sender, PrintPageEventArgs e)
     {
-        using var font = new Font("Segoe UI", 8);
-        using var titleFont = new Font("Segoe UI", 13, FontStyle.Bold);
-        var y = e.MarginBounds.Top;
-        e.Graphics?.DrawString("Products", titleFont, Brushes.Black, e.MarginBounds.Left, y);
-        y += 30;
-        e.Graphics?.DrawString("SKU                 Name                         Category             Price       Quantity", font, Brushes.Black, e.MarginBounds.Left, y);
-        y += 20;
+        if (e.Graphics is null)
+        {
+            e.HasMorePages = false;
+            return;
+        }
+
+        using var titleFont = new Font("Segoe UI", 16, FontStyle.Bold);
+        using var headerFont = new Font("Segoe UI", 10, FontStyle.Bold);
+        using var font = new Font("Segoe UI", 9);
+        using var headerBrush = new SolidBrush(Color.FromArgb(232, 240, 248));
+        using var linePen = new Pen(Color.FromArgb(170, 180, 190));
+        using var leftFormat = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+        using var rightFormat = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+
+        var graphics = e.Graphics;
+        var left = (float)e.MarginBounds.Left;
+        var right = (float)e.MarginBounds.Right;
+        var tableWidth = right - left;
+        
+        var skuWidth = tableWidth * 0.15f;
+        var nameWidth = tableWidth * 0.35f;
+        var categoryWidth = tableWidth * 0.20f;
+        var priceWidth = tableWidth * 0.15f;
+        var qtyWidth = tableWidth * 0.15f;
+
+        var y = (float)e.MarginBounds.Top;
+
+        graphics.DrawString("Products", titleFont, Brushes.Black, left, y);
+        y += 40;
+
+        var headerHeight = 30f;
+        graphics.FillRectangle(headerBrush, left, y, tableWidth, headerHeight);
+
+        var x = left;
+        DrawCell(graphics, "SKU", headerFont, Brushes.Black, new RectangleF(x, y, skuWidth, headerHeight), leftFormat);
+        x += skuWidth;
+        DrawCell(graphics, "Name", headerFont, Brushes.Black, new RectangleF(x, y, nameWidth, headerHeight), leftFormat);
+        x += nameWidth;
+        DrawCell(graphics, "Category", headerFont, Brushes.Black, new RectangleF(x, y, categoryWidth, headerHeight), leftFormat);
+        x += categoryWidth;
+        DrawCell(graphics, "Price", headerFont, Brushes.Black, new RectangleF(x, y, priceWidth, headerHeight), rightFormat);
+        x += priceWidth;
+        DrawCell(graphics, "Qty", headerFont, Brushes.Black, new RectangleF(x, y, qtyWidth, headerHeight), rightFormat);
+        y += headerHeight;
 
         while (_printIndex < _printProducts.Count)
         {
             var product = _printProducts[_printIndex++];
-            var line = $"{product.Sku,-20}{product.Name,-30}{product.CategoryName,-20}{product.Price,10:N2}{product.Quantity,12:N0}";
-            e.Graphics?.DrawString(line, font, Brushes.Black, e.MarginBounds.Left, y);
-            y += 18;
-            if (y + 18 > e.MarginBounds.Bottom)
+            var rowHeight = 25f;
+            x = left;
+            DrawCell(graphics, product.Sku, font, Brushes.Black, new RectangleF(x, y, skuWidth, rowHeight), leftFormat);
+            x += skuWidth;
+            DrawCell(graphics, product.Name, font, Brushes.Black, new RectangleF(x, y, nameWidth, rowHeight), leftFormat);
+            x += nameWidth;
+            DrawCell(graphics, product.CategoryName, font, Brushes.Black, new RectangleF(x, y, categoryWidth, rowHeight), leftFormat);
+            x += categoryWidth;
+            DrawCell(graphics, product.Price.ToString("N2"), font, Brushes.Black, new RectangleF(x, y, priceWidth, rowHeight), rightFormat);
+            x += priceWidth;
+            DrawCell(graphics, product.Quantity.ToString("N0"), font, Brushes.Black, new RectangleF(x, y, qtyWidth, rowHeight), rightFormat);
+            
+            graphics.DrawLine(linePen, left, y + rowHeight, right, y + rowHeight);
+            y += rowHeight;
+
+            if (y + rowHeight > e.MarginBounds.Bottom)
             {
-                e.HasMorePages = _printIndex < _printProducts.Count;
+                e.HasMorePages = true;
                 return;
             }
         }
 
         e.HasMorePages = false;
     }
+
+    private static void DrawCell(Graphics graphics, string value, Font font, Brush brush, RectangleF bounds, StringFormat format) =>
+        graphics.DrawString(value, font, brush, bounds, format);
 
     private async Task<List<Product>> LoadProductsForExportAsync()
     {
